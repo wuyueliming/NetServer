@@ -1,0 +1,33 @@
+# Compiled objects
+*.o
+*.obj
+*.exe
+*.out
+*.app
+
+# Binaries
+server
+client
+client1
+client2
+client3
+client4
+client5
+client6
+bench_server
+bench_server_opt
+webbench
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

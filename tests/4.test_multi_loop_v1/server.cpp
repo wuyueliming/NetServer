@@ -1,0 +1,157 @@
+#include "../../src/server/base/InetAddr.hpp"
+#include "../../src/server/base/LOGGER/log.h"
+#include "../../src/server/TcpServer.h"
+#include "../../src/server/Connection.h"
+#include "../../src/server/RawProtocolContext.hpp"
+#include <string>
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <deque>
+#include <atomic>
+
+using namespace Aether;
+
+//线程池：模拟业务线程池，处理接收到的数据
+class ThreadPool {
+public:
+    ThreadPool(int count):_stop(false) {
+        for (int i = 0; i < count; i++) {
+            _workers.emplace_back([this](){ WorkerLoop(); });
+        }
+    }
+    ~ThreadPool() {
+        _stop = true;
+        _cv.notify_all();
+        for (auto &t : _workers) {
+            if (t.joinable()) t.join();
+        }
+    }
+    void Push(std::function<void()> task) {
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            _tasks.push_back(std::move(task));
+        }
+        _cv.notify_one();
+    }
+private:
+    void WorkerLoop() {
+        while (!_stop) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(_mutex);
+                _cv.wait_for(lock, std::chrono::milliseconds(100), [this](){ return _stop || !_tasks.empty(); });
+                if (_stop && _tasks.empty()) return;
+                if (_tasks.empty()) continue;
+                task = std::move(_tasks.front());
+                _tasks.pop_front();
+            }
+            task();
+        }
+    }
+private:
+    std::vector<std::thread> _workers;
+    std::deque<std::function<void()>> _tasks;
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _stop;
+};
+
+//全局对象
+TcpServer *g_server = nullptr;
+ThreadPool *g_pool = nullptr;
+std::atomic<int> g_conn_count{0};
+std::atomic<int> g_msg_count{0};
+
+//1.连接建立回调
+void OnConnected(ConnectionPtr conn) {
+    conn->SetContext(std::make_shared<RawProtocolContext>());
+    g_conn_count++;
+    LOG(INFO) << "New connection: " << conn->PeerAddr().StrAddr()
+                        << " connID:" << conn->ID()
+                        << " total:" << g_conn_count.load();
+}
+
+//2.消息回调：将业务处理丢到线程池中
+void OnMessage(ConnectionPtr conn) {
+    while (conn->HasMessage()) {
+        std::any msg = conn->Recv();
+        std::string str = std::any_cast<std::string>(std::move(msg));
+        g_msg_count++;
+        //将回显业务丢到线程池中处理，模拟耗时业务
+        g_pool->Push([conn, str = std::move(str)](){
+            //在线程池线程中调用Send，Send内部会通过runInLoop保证线程安全
+            conn->Send(str.c_str(), str.size());
+        });
+    }
+}
+
+//3.连接关闭回调
+void OnClosed(ConnectionPtr conn) {
+    g_conn_count--;
+    LOG(INFO) << "Connection closed: " << conn->PeerAddr().StrAddr()
+                        << " connID:" << conn->ID()
+                        << " total:" << g_conn_count.load();
+}
+
+//4.任意事件回调
+void OnEvent(ConnectionPtr conn) {
+    //可以用来刷新连接的活跃度等
+}
+
+//5.定时心跳任务
+void HeartbeatTask() {
+    static int count = 0;
+    LOG(INFO) << "Server heartbeat: " << ++count
+                        << " connections:" << g_conn_count.load()
+                        << " messages:" << g_msg_count.load();
+    if (g_server) {
+        g_server->AddTimedTask(HeartbeatTask, 3);
+    }
+}
+
+//6.定时统计任务
+void StatsTask() {
+    static int last_msg = 0;
+    int curr = g_msg_count.load();
+    LOG(INFO) << "Stats: " << (curr - last_msg) << " msg/s, total:" << curr;
+    last_msg = curr;
+    if (g_server) {
+        g_server->AddTimedTask(StatsTask, 5);
+    }
+}
+
+int main() {
+    const int port = 8080;
+
+    //创建业务线程池
+    ThreadPool pool(4);
+    g_pool = &pool;
+
+    //创建服务器
+    TcpServer server(port);
+    g_server = &server;
+
+    //设置从reactor线程数
+    server.SetThreadCount(3);
+
+    //设置超时销毁：30秒无活动则断开
+    server.EnableInactiveRelease(30);
+
+    //注册回调
+    server.SetConnectedCallback(OnConnected);
+    server.SetMessageCallback(OnMessage);
+    server.SetClosedCallback(OnClosed);
+    server.SetEventCallback(OnEvent);
+
+    //注册定时任务
+    server.AddTimedTask(HeartbeatTask, 3);
+    server.AddTimedTask(StatsTask, 5);
+
+    LOG(INFO) << "Echo Server starting on port " << port
+                        << " with 3 sub-reactors and 4 business threads";
+
+    server.start();
+
+    return 0;
+}
