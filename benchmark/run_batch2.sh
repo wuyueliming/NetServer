@@ -1,8 +1,15 @@
 #!/bin/bash
-BENCH_DIR="/home/wuyue/CODE/project/linux/3.muduo/BenchMark"
-cd "$BENCH_DIR"
-WEB="$BENCH_DIR/webbench"
-RF="/tmp/bench_results/batch2_$(date +%Y%m%d_%H%M%S).txt"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RESULT_DIR="${SCRIPT_DIR}/results"
+mkdir -p "$RESULT_DIR"
+cd "$SCRIPT_DIR"
+WEB="python3 ${SCRIPT_DIR}/bench_client.py"
+
+# 替换 run_bench 以支持新旧参数
+eval "$(declare -f run_bench | sed 's/\$extra/$(for arg in \$extra; do [ \"\$arg\" = \"-2\" ] \&\& echo -n \" \" || [ \"\$arg\" = \"-f\" ] \&\& echo -n \" \" || echo -n \"\"; done)/')"
+RF="$RESULT_DIR/batch2_$(date +%Y%m%d_%H%M%S).txt"
 log() { echo "$(date '+%H:%M:%S') $*" | tee -a "$RF"; }
 
 run_bench() {

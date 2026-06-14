@@ -1,13 +1,30 @@
 #include "../src/protocol/HTTP/httpServer.hpp"
-#include "../src/server/base/LOGGER/log.h"
+
+// 使用 Log_bench.hpp 的 NullLogStrategy 替代核心 LOGGER（benchmark 模式消除日志开销）
+#undef LOG
+#include "Log_bench.hpp"
+
 #include <string>
+#include <cstdlib>
 
 using namespace Aether;
 
 int main() {
     // 性能测试版本：禁用日志以减少开销
-    HttpServer server(8080, 60);
-    server.SetThreadCount(4);
+    NetServer::LogModule::Enable_Null_Log_Strategy();
+
+    // 通过环境变量配置（默认值: port=8080, threads=4, timeout=60）
+    auto get_env = [](const char *name, int default_val) {
+        const char *val = std::getenv(name);
+        return val ? std::stoi(val) : default_val;
+    };
+
+    int port = get_env("BENCH_PORT", 8080);
+    int threads = get_env("BENCH_THREADS", 4);
+    int timeout = get_env("BENCH_TIMEOUT", 60);
+
+    HttpServer server(port, timeout);
+    server.SetThreadCount(threads);
     server.SetBaseDir("./wwwroot");
 
     server.Get("/hello", [](const HttpRequest &req, HttpResponse *rsp) {
@@ -23,7 +40,6 @@ int main() {
         rsp->SetContent(body, "text/plain");
     });
 
-    LOG(INFO) << "Bench Server (null log) starting on port 8080 (4 IO threads)";
     server.Listen();
 
     return 0;

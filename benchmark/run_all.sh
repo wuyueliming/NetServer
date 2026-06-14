@@ -1,30 +1,40 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-BENCH_DIR="/home/wuyue/CODE/project/linux/3.muduo/BenchMark"
-cd "$BENCH_DIR"
-
-WEB="$BENCH_DIR/webbench"
-RESULT_DIR="/tmp/bench_results"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RESULT_DIR="${SCRIPT_DIR}/results"
 mkdir -p "$RESULT_DIR"
-RESULT_FILE="$RESULT_DIR/bench_report_$(date +%Y%m%d_%H%M%S).txt"
+cd "$SCRIPT_DIR"
 
-log() {
-    echo "$(date '+%H:%M:%S') $*" | tee -a "$RESULT_FILE"
-}
+WEB="python3 ${SCRIPT_DIR}/bench_client.py"
 
+# 替换 webbench 参数为 bench_client.py 参数
 run_bench() {
     local label="$1"
     local url="$2"
     local clients="$3"
     local duration="${4:-30}"
     local extra="${5:-}"
-    
+
+    local http_ver="-1"
+    local force=""
+    for arg in $extra; do
+        [ "$arg" = "-2" ] && http_ver="-2"
+        [ "$arg" = "-f" ] && force="-f"
+    done
+
     log "  [$label] clients=$clients time=${duration}s ${extra}"
     local output
-    output=$("$WEB" -t "$duration" -c "$clients" $extra "$url" 2>&1)
-    log "  $output"
+    output=$($WEB -t "$duration" -c "$clients" $http_ver $force "$url" 2>&1)
+    log "  $(echo "$output" | grep -v "^CSV:" | head -5)"
     echo "$output"
+}
+RESULT_DIR="/tmp/bench_results"
+mkdir -p "$RESULT_DIR"
+RESULT_FILE="$RESULT_DIR/bench_report_$(date +%Y%m%d_%H%M%S).txt"
+
+log() {
+    echo "$(date '+%H:%M:%S') $*" | tee -a "$RESULT_FILE"
 }
 
 # Start server in background

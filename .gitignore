@@ -4,6 +4,7 @@
 *.exe
 *.out
 *.app
+*.trae
 
 # Binaries
 server
@@ -17,6 +18,12 @@ client6
 bench_server
 bench_server_opt
 webbench
+
+# Test directory binaries (any subdirectory)
+tests/*/server
+tests/*/client
+tests/*/client[1-9]*
+tests/*/client[0-9]*
 
 # IDE
 .vscode/

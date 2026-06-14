@@ -3,7 +3,7 @@
 #include "../../src/server/base/LOGGER/log.h"
 #include "../../src/server/TcpServer.h"
 #include "../../src/server/Connection.h"
-#include "../../src/server/RawProtocolContext.hpp"
+#include "../../src/protocol/RawProtocolContext.hpp"
 #include <iostream>
 #include <cstring>
 #include <string>

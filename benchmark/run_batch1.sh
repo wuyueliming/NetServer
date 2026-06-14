@@ -1,14 +1,20 @@
 #!/bin/bash
-BENCH_DIR="/home/wuyue/CODE/project/linux/3.muduo/BenchMark"
-cd "$BENCH_DIR"
-WEB="$BENCH_DIR/webbench"
-RF="/tmp/bench_results/batch1_$(date +%Y%m%d_%H%M%S).txt"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RESULT_DIR="${SCRIPT_DIR}/results"
+mkdir -p "$RESULT_DIR"
+cd "$SCRIPT_DIR"
+WEB="python3 ${SCRIPT_DIR}/bench_client.py"
+RF="$RESULT_DIR/batch1_$(date +%Y%m%d_%H%M%S).txt"
 log() { echo "$(date '+%H:%M:%S') $*" | tee -a "$RF"; }
 
 run_bench() {
     local label="$1" url="$2" clients="$3" duration="${4:-20}" extra="${5:-}"
+    local http_ver="-1" force=""
+    for arg in $extra; do [ "$arg" = "-2" ] && http_ver="-2"; [ "$arg" = "-f" ] && force="-f"; done
     log "  [$label] c=$clients t=${duration}s $extra"
-    "$WEB" -t "$duration" -c "$clients" $extra "$url" 2>&1 | tee -a "$RF"
+    $WEB -t "$duration" -c "$clients" $http_ver $force "$url" 2>&1 | tee -a "$RF"
     log ""
 }
 

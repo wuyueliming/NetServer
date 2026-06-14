@@ -18,7 +18,7 @@ void Numbers(const HttpRequest &req, HttpResponse *rsp) {
 
 void Echo(const HttpRequest &req, HttpResponse *rsp) {
     if (req.HasParam("msg") == false) {
-        rsp->_statu = 400;
+        rsp->_status = 400;
         return;
     }
     const std::string &msg = req.GetParam("msg");

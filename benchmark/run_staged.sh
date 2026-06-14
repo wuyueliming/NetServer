@@ -1,11 +1,16 @@
 #!/bin/bash
-BDIR="/home/wuyue/CODE/project/linux/3.muduo/BenchMark"
-WEB="$BDIR/webbench"
-RDIR="/tmp/bench_stages"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RESULT_DIR="${SCRIPT_DIR}/results"
+mkdir -p "$RESULT_DIR"
+cd "$SCRIPT_DIR"
+WEB="python3 ${SCRIPT_DIR}/bench_client.py"
+RDIR="$RESULT_DIR/stages"
 mkdir -p "$RDIR"
 
 pkill -f bench_server 2>/dev/null; sleep 1
-cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+./bench_server_opt >/dev/null 2>&1 & sleep 2
 
 ###############################################################################
 # STAGE 1: Low Concurrency (c=10~500)
@@ -35,7 +40,7 @@ cat "$R1"
 # STAGE 2: Medium Concurrency (c=500~2000)
 ###############################################################################
 pkill -f bench_server 2>/dev/null; sleep 1
-cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+./bench_server_opt >/dev/null 2>&1 & sleep 2
 
 R2="$RDIR/stage2.txt"
 echo "=== Stage 2: Medium Concurrency ===" > "$R2"
@@ -62,7 +67,7 @@ cat "$R2"
 # STAGE 3: High Concurrency (c=2000~4000)
 ###############################################################################
 pkill -f bench_server 2>/dev/null; sleep 1
-cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+./bench_server_opt >/dev/null 2>&1 & sleep 2
 
 R3="$RDIR/stage3.txt"
 echo "=== Stage 3: High Concurrency Stress ===" > "$R3"
@@ -75,7 +80,7 @@ for c in 2000 2500 3000 3500 4000; do
     if ! curl -s -o /dev/null http://localhost:8080/ping 2>/dev/null; then
         echo "CRASHED at c=$c" >> "$R3"
         pkill -f bench_server 2>/dev/null; sleep 1
-        cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+        ./bench_server_opt >/dev/null 2>&1 & sleep 2
     fi
     sleep 1
 done
@@ -87,7 +92,7 @@ for c in 2000 2500 3000 3500 4000; do
     if ! curl -s -o /dev/null http://localhost:8080/ping 2>/dev/null; then
         echo "CRASHED at c=$c" >> "$R3"
         pkill -f bench_server 2>/dev/null; sleep 1
-        cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+        ./bench_server_opt >/dev/null 2>&1 & sleep 2
     fi
     sleep 1
 done
@@ -98,7 +103,7 @@ cat "$R3"
 # STAGE 4: Protocol & Stability
 ###############################################################################
 pkill -f bench_server 2>/dev/null; sleep 1
-cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+./bench_server_opt >/dev/null 2>&1 & sleep 2
 
 R4="$RDIR/stage4.txt"
 echo "=== Stage 4: Protocol & Stability ===" > "$R4"
@@ -129,7 +134,7 @@ cat "$R4"
 # STAGE 5: Extreme Boundary
 ###############################################################################
 pkill -f bench_server 2>/dev/null; sleep 1
-cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+./bench_server_opt >/dev/null 2>&1 & sleep 2
 
 R5="$RDIR/stage5.txt"
 echo "=== Stage 5: Extreme Boundary ===" > "$R5"
@@ -142,7 +147,7 @@ for c in 4000 5000 6000 7000 8000 10000; do
     if ! curl -s -o /dev/null http://localhost:8080/ping 2>/dev/null; then
         echo "CRASHED at c=$c" >> "$R5"
         pkill -f bench_server 2>/dev/null; sleep 1
-        cd "$BDIR" && ./bench_server >/dev/null 2>&1 & sleep 2
+        ./bench_server_opt >/dev/null 2>&1 & sleep 2
     fi
     sleep 2
 done

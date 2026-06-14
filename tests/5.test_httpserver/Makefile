@@ -3,11 +3,11 @@ CXXFLAGS = -std=c++17 -Wall -g -I../../src/server -I../../src/server/base -I../.
 
 SRCS_DIR = ../../src/server
 
-SRCS = $(SRCS_DIR)/EventLoop.cc \
+SRCS = $(SRCS_DIR)/Reactor.cc \
        $(SRCS_DIR)/Acceptor.cc \
        $(SRCS_DIR)/TcpServer.cc \
        $(SRCS_DIR)/LoopThread.cc \
-       $(SRCS_DIR)/LoopThreadPool.cc \
+       $(SRCS_DIR)/ThreadPool.cc \
        $(SRCS_DIR)/TcpConnection.cc \
        $(SRCS_DIR)/TimeWheel.cc \
        $(SRCS_DIR)/Channel.cc \

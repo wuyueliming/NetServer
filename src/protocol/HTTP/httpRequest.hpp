@@ -27,7 +27,7 @@ class HttpRequest {
         }
         //插入头部字段
         void SetHeader(const std::string &key, const std::string &val) {
-            _headers.insert(std::make_pair(key, val));
+            _headers[key] = val;
         }
         //判断是否存在指定头部字段
         bool HasHeader(const std::string &key) const {
@@ -47,7 +47,7 @@ class HttpRequest {
         }
         //插入查询字符串
         void SetParam(const std::string &key, const std::string &val) {
-            _params.insert(std::make_pair(key, val));
+            _params[key] = val;
         }
         //判断是否有某个指定的查询字符串
         bool HasParam(const std::string &key) const {
@@ -72,15 +72,20 @@ class HttpRequest {
             if (ret == false) {
                 return 0;
             }
-            std::string clen = GetHeader("Content-Length");
-            return std::stol(clen);
+            const std::string &clen = GetHeader("Content-Length");
+            try {
+                long len = std::stol(clen);
+                return len < 0 ? 0 : static_cast<size_t>(len);
+            } catch (const std::exception &) {
+                return 0;
+            }
         }
         //判断是否是短链接
         bool Close() const {
-            // 没有Connection字段，或者有Connection但是值是close，则都是短链接，否则就是长连接
-            if (HasHeader("Connection") == true && GetHeader("Connection") == "keep-alive") {
-                return false;
+            // HTTP/1.1 默认是长连接，只有显式指定 Connection: close 时才关闭
+            if (HasHeader("Connection") == true && GetHeader("Connection") == "close") {
+                return true;
             }
-            return true;
+            return false;
         }
 };

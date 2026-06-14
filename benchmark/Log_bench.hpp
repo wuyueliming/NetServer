@@ -21,7 +21,7 @@ namespace NetServer
         class LogStrategy
         {
         public:
-            ~LogStrategy() = default;
+            virtual ~LogStrategy() = default;
             virtual void SyncLog(const std::string &message) = 0;
         };
 

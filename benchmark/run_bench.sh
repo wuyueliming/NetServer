@@ -1,7 +1,9 @@
 #!/bin/bash
+set -euo pipefail
 
-WEB="$(dirname "$0")/webbench"
-RESULT_DIR="/tmp/bench_results"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WEB="python3 ${SCRIPT_DIR}/bench_client.py"
+RESULT_DIR="${SCRIPT_DIR}/results"
 mkdir -p "$RESULT_DIR"
 RESULT_FILE="$RESULT_DIR/bench_report_$(date +%Y%m%d_%H%M%S).txt"
 

@@ -5,10 +5,12 @@
 #include <string>
 #include <vector>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <unordered_map>
 #include "../../server/base/LOGGER/log.h"
 
-inline std::unordered_map<int, std::string> _statu_msg = {
+inline const std::unordered_map<int, std::string> _status_msg = {
     {100,  "Continue"},
     {101,  "Switching Protocol"},
     {102,  "Processing"},
@@ -23,6 +25,7 @@ inline std::unordered_map<int, std::string> _statu_msg = {
     {207,  "Multi-Status"},
     {208,  "Already Reported"},
     {226,  "IM Used"},
+    {500,  "Internal Server Error"},
     {300,  "Multiple Choice"},
     {301,  "Moved Permanently"},
     {302,  "Found"},
@@ -73,7 +76,7 @@ inline std::unordered_map<int, std::string> _statu_msg = {
     {511,  "Network Authentication Required"}
 };
 
-inline std::unordered_map<std::string, std::string> _mime_msg = {
+inline const std::unordered_map<std::string, std::string> _mime_msg = {
     {".aac",        "audio/aac"},
     {".abw",        "application/x-abiword"},
     {".arc",        "application/x-freearc"},
@@ -150,13 +153,16 @@ class Util {
     public:
         //字符串分割函数,将src字符串按照sep字符进行分割，得到的各个字串放到arry中，最终返回字串的数量
         static size_t Split(const std::string &src, const std::string &sep, std::vector<std::string> *arry) {
+            if (sep.empty()) {
+                arry->push_back(src);
+                return 1;
+            }
             size_t offset = 0;
             // 有10个字符，offset是查找的起始位置，范围应该是0~9，offset==10就代表已经越界了
             while(offset < src.size()) {
                 size_t pos = src.find(sep, offset);//在src字符串偏移量offset处，开始向后查找sep字符/字串，返回查找到的位置
                 if (pos == std::string::npos) {//没有找到特定的字符
                     //将剩余的部分当作一个字串，放入arry中
-                    if(pos == src.size()) break;
                     arry->push_back(src.substr(offset));
                     return arry->size();
                 }
@@ -169,32 +175,33 @@ class Util {
             }
             return arry->size();
         }
-        //读取文件的所有内容，将读取的内容放到一个Buffer中
+        //读取文件的所有内容，将读取的内容放到一个Buffer中（使用 O_NOFOLLOW 防止符号链接攻击）
         static bool ReadFile(const std::string &filename, std::string *buf) {
-            std::ifstream ifs(filename, std::ios::binary);
-            if (ifs.is_open() == false) {
-                printf("OPEN %s FILE FAILED!!", filename.c_str());
+            int fd = open(filename.c_str(), O_RDONLY | O_NOFOLLOW);
+            if (fd < 0) {
+                LOG(ERROR) << "OPEN " << filename << " FILE FAILED!";
                 return false;
             }
-            size_t fsize = 0;
-            ifs.seekg(0, ifs.end);//跳转读写位置到末尾
-            fsize = ifs.tellg();  //获取当前读写位置相对于起始位置的偏移量，从末尾偏移刚好就是文件大小
-            ifs.seekg(0, ifs.beg);//跳转到起始位置
-            buf->resize(fsize); //开辟文件大小的空间
-            ifs.read(&(*buf)[0], fsize);
-            if (ifs.good() == false) {
-                printf("READ %s FILE FAILED!!", filename.c_str());
-                ifs.close();
+            struct stat st;
+            if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+                LOG(ERROR) << "STAT " << filename << " FAILED OR NOT A REGULAR FILE!";
+                close(fd);
                 return false;
             }
-            ifs.close();
+            buf->resize(st.st_size);
+            ssize_t n = read(fd, &(*buf)[0], st.st_size);
+            close(fd);
+            if (n != st.st_size) {
+                LOG(ERROR) << "READ " << filename << " FILE FAILED!";
+                return false;
+            }
             return true;
         }
         //向文件写入数据
         static bool WriteFile(const std::string &filename, const std::string &buf) {
             std::ofstream ofs(filename, std::ios::binary | std::ios::trunc);
             if (ofs.is_open() == false) {
-                printf("OPEN %s FILE FAILED!!", filename.c_str());
+                LOG(ERROR) << "OPEN " << filename << " FILE FAILED!";
                 return false;
             }
             ofs.write(buf.c_str(), buf.size());
@@ -211,8 +218,9 @@ class Util {
         //  不编码的特殊字符： RFC3986文档规定 . - _ ~ 字母，数字属于绝对不编码字符
         //RFC3986文档规定，编码格式 %HH 
         //W3C标准中规定，查询字符串中的空格，需要编码为+， 解码则是+转空格
-        static std::string UrlEncode(const std::string url, bool convert_space_to_plus) {
+        static std::string UrlEncode(const std::string &url, bool convert_space_to_plus) {
             std::string res;
+            res.reserve(url.size());
             for (auto &c : url) {
                 if (c == '.' || c == '-' || c == '_' || c == '~' || isalnum(c)) {
                     res += c;
@@ -230,7 +238,7 @@ class Util {
             }
             return res;
         }
-        static char HEXTOI(char c) {
+        static int HEXTOI(char c) {
             if (c >= '0' && c <= '9') {
                 return c - '0';
             }else if (c >= 'a' && c <= 'z') {
@@ -240,7 +248,7 @@ class Util {
             }
             return -1; 
         }
-        static std::string UrlDecode(const std::string url, bool convert_plus_to_space) {
+        static std::string UrlDecode(const std::string &url, bool convert_plus_to_space) {
             //遇到了%，则将紧随其后的2个字符，转换为数字，第一个数字左移4位，然后加上第二个数字  + -> 2b  %2b->2 << 4 + 11
             std::string res;
             for (int i = 0; i < (int)url.size(); i++) {
@@ -249,25 +257,27 @@ class Util {
                     continue;
                 }
                 if (url[i] == '%' && (i + 2) < (int)url.size()) {
-                    char v1 = HEXTOI(url[i + 1]);
-                    char v2 = HEXTOI(url[i + 2]);
-                    char v = v1 * 16 + v2;
-                    res += v;
-                    i += 2;
-                    continue;
+                    int v1 = HEXTOI(url[i + 1]);
+                    int v2 = HEXTOI(url[i + 2]);
+                    if (v1 >= 0 && v2 >= 0) {
+                        char v = static_cast<char>((v1 << 4) | v2);
+                        res += v;
+                        i += 2;
+                        continue;
+                    }
                 }
                 res += url[i];
             }
             return res;
         }
         //响应状态码的描述信息获取
-        static std::string StatuDesc(int statu) {
+        static std::string StatusDesc(int status) {
             
-            auto it = _statu_msg.find(statu);
-            if (it != _statu_msg.end()) {
+            auto it = _status_msg.find(status);
+            if (it != _status_msg.end()) {
                 return it->second;
             }
-            return "Unknow";
+            return "Unknown";
         }
         //根据文件后缀名获取文件mime
         static std::string ExtMime(const std::string &filename) {

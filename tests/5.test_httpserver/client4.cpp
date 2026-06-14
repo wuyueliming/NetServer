@@ -30,7 +30,10 @@ int main()
             return -1;
         }else if (pid == 0) {
             int sock = socket(AF_INET, SOCK_STREAM, 0);
-            assert(sock >= 0);
+            if (sock < 0) {
+                std::cerr << "SOCKET ERROR" << std::endl;
+                exit(1);
+            }
 
             struct sockaddr_in addr;
             bzero(&addr, sizeof(addr));
@@ -39,14 +42,26 @@ int main()
             inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
             int ret = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
-            assert(ret == 0);
+            if (ret != 0) {
+                std::cerr << "CONNECT ERROR" << std::endl;
+                close(sock);
+                exit(1);
+            }
 
             std::string req = "GET /hello HTTP/1.1\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n";
-            while(1) {
-                assert(send(sock, req.c_str(), req.size(), 0) != -1);
+            int request_count = 0;
+            while(request_count < 100) {
+                if (send(sock, req.c_str(), req.size(), 0) == -1) {
+                    std::cerr << "[CHILD " << i << "] SEND ERROR" << std::endl;
+                    break;
+                }
                 char buf[1024] = {0};
-                assert(recv(sock, buf, 1023, 0) > 0);
-                std::cout << "[CHILD " << i << "] RECV OK" << std::endl;
+                ssize_t n = recv(sock, buf, 1023, 0);
+                if (n <= 0) {
+                    std::cout << "[CHILD " << i << "] Server closed connection" << std::endl;
+                    break;
+                }
+                std::cout << "[CHILD " << i << "] RECV OK (" << ++request_count << ")" << std::endl;
             }
             close(sock);
             exit(0);

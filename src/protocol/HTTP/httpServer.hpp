@@ -3,16 +3,14 @@
 #include <string>
 #include <vector>
 #include <regex>
-#include <sstream>
 #include <functional>
-#include <cassert>
 #include "Util.hpp"
 #include "httpContext.hpp"
 #include "httpResponse.hpp"
 #include "../../server/TcpServer.h"
 #include "../../server/Connection.h"
 
-#define DEFALT_TIMEOUT 60
+#define DEFAULT_TIMEOUT 60
 
 class HttpServer {
     private:
@@ -34,9 +32,9 @@ class HttpServer {
             body += "</head>";
             body += "<body>";
             body += "<h1>";
-            body += std::to_string(rsp->_statu);
+            body += std::to_string(rsp->_status);
             body += " ";
-            body += Util::StatuDesc(rsp->_statu);
+            body += Util::StatusDesc(rsp->_status);
             body += "</h1>";
             body += "</body>";
             body += "</html>";
@@ -61,16 +59,27 @@ class HttpServer {
                 rsp.SetHeader("Location", rsp._redirect_url);
             }
             //2. 将rsp中的要素，按照http协议格式进行组织
-            std::stringstream rsp_str;
-            rsp_str << req._version << " " << std::to_string(rsp._statu) << " " << Util::StatuDesc(rsp._statu) << "\r\n";
+            //   头部和body分开发送，避免大body的二次拷贝
+            std::string header;
+            header.reserve(256 + rsp._headers.size() * 64);
+            header += req._version;
+            header += ' ';
+            header += std::to_string(rsp._status);
+            header += ' ';
+            header += Util::StatusDesc(rsp._status);
+            header += "\r\n";
             for (auto &head : rsp._headers) {
-                rsp_str << head.first << ": " << head.second << "\r\n";
+                header += head.first;
+                header += ": ";
+                header += head.second;
+                header += "\r\n";
             }
-            rsp_str << "\r\n";
-            rsp_str << rsp._body;
-            //3. 发送数据
-            std::string response = rsp_str.str();
-            conn->Send(response.c_str(), response.size());
+            header += "\r\n";
+            //3. 发送数据（header 和 body 分两次发送）
+            conn->Send(header.c_str(), header.size());
+            if (rsp._body.empty() == false) {
+                conn->Send(rsp._body.c_str(), rsp._body.size());
+            }
         }
         bool IsFileHandler(const HttpRequest &req) {
             // 1. 必须设置了静态资源根目录
@@ -106,6 +115,7 @@ class HttpServer {
             }
             bool ret = Util::ReadFile(req_path, &rsp->_body);
             if (ret == false) {
+                rsp->_status = 404;
                 return;
             }
             std::string mime = Util::ExtMime(req_path);
@@ -127,7 +137,7 @@ class HttpServer {
                 }
                 return functor(req, rsp);//传入请求信息，和空的rsp，执行处理函数
             }
-            rsp->_statu = 404;
+            rsp->_status = 404;
         }
         void Route(HttpRequest &req, HttpResponse *rsp) {
             //1. 对请求进行分辨，是一个静态资源请求，还是一个功能性请求
@@ -147,7 +157,7 @@ class HttpServer {
             }else if (req._method == "DELETE") {
                 return Dispatcher(req, rsp, _delete_route);
             }
-            rsp->_statu = 405;// Method Not Allowed
+            rsp->_status = 405;// Method Not Allowed
             return ;
         }
         //设置上下文
@@ -158,7 +168,12 @@ class HttpServer {
         void OnMessage(const Aether::ConnectionPtr &conn) {
             if (conn->RecvError() >= 400) {
                 std::any partial = conn->RecvPartial();
-                HttpRequest req = std::any_cast<HttpRequest>(partial);
+                HttpRequest req;
+                try {
+                    req = std::any_cast<HttpRequest>(partial);
+                } catch (const std::bad_any_cast &) {
+                    req = HttpRequest();
+                }
                 HttpResponse rsp(conn->RecvError());
                 ErrorHandler(req, &rsp);
                 WriteResponse(conn, req, rsp);
@@ -171,7 +186,7 @@ class HttpServer {
                 HttpRequest req = std::any_cast<HttpRequest>(std::move(msg));
                 HttpResponse rsp(200);
                 Route(req, &rsp);
-                if (rsp._statu >= 400) {
+                if (rsp._status >= 400) {
                     ErrorHandler(req, &rsp);
                 }
                 WriteResponse(conn, req, rsp);
@@ -182,13 +197,16 @@ class HttpServer {
             }
         }
     public:
-        HttpServer(int port, int timeout = DEFALT_TIMEOUT):_server(port) {
+        HttpServer(int port, int timeout = DEFAULT_TIMEOUT):_server(port) {
             _server.EnableInactiveRelease(timeout);
             _server.SetConnectedCallback(std::bind(&HttpServer::OnConnected, this, std::placeholders::_1));
             _server.SetMessageCallback(std::bind(&HttpServer::OnMessage, this, std::placeholders::_1));
         }
         void SetBaseDir(const std::string &path) {
-            assert(Util::IsDirectory(path) == true);
+            if (Util::IsDirectory(path) == false) {
+                LOG(ERROR) << "SetBaseDir failed: " << path << " is not a valid directory";
+                return;
+            }
             _basedir = path;
         }
         /*设置/添加，请求（请求的正则表达）与处理函数的映射关系*/

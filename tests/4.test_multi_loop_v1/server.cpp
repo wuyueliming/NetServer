@@ -2,7 +2,7 @@
 #include "../../src/server/base/LOGGER/log.h"
 #include "../../src/server/TcpServer.h"
 #include "../../src/server/Connection.h"
-#include "../../src/server/RawProtocolContext.hpp"
+#include "../../src/protocol/RawProtocolContext.hpp"
 #include <string>
 #include <thread>
 #include <mutex>
@@ -13,14 +13,14 @@
 using namespace Aether;
 
 //线程池：模拟业务线程池，处理接收到的数据
-class ThreadPool {
+class BusinessPool {
 public:
-    ThreadPool(int count):_stop(false) {
+    BusinessPool(int count):_stop(false) {
         for (int i = 0; i < count; i++) {
             _workers.emplace_back([this](){ WorkerLoop(); });
         }
     }
-    ~ThreadPool() {
+    ~BusinessPool() {
         _stop = true;
         _cv.notify_all();
         for (auto &t : _workers) {
@@ -46,7 +46,11 @@ private:
                 task = std::move(_tasks.front());
                 _tasks.pop_front();
             }
-            task();
+            try {
+                task();
+            } catch (const std::exception &e) {
+                LOG(ERROR) << "BusinessPool task exception: " << e.what();
+            }
         }
     }
 private:
@@ -54,12 +58,12 @@ private:
     std::deque<std::function<void()>> _tasks;
     std::mutex _mutex;
     std::condition_variable _cv;
-    bool _stop;
+    std::atomic<bool> _stop;
 };
 
 //全局对象
 TcpServer *g_server = nullptr;
-ThreadPool *g_pool = nullptr;
+BusinessPool *g_pool = nullptr;
 std::atomic<int> g_conn_count{0};
 std::atomic<int> g_msg_count{0};
 
@@ -125,7 +129,7 @@ int main() {
     const int port = 8080;
 
     //创建业务线程池
-    ThreadPool pool(4);
+    BusinessPool pool(4);
     g_pool = &pool;
 
     //创建服务器
