@@ -1,14 +1,12 @@
 # Compiled objects
 *.o
+*.d
 *.obj
 *.exe
 *.out
 *.app
-*.trae
 
 # Binaries
-server
-client
 client1
 client2
 client3
@@ -18,6 +16,7 @@ client6
 bench_server
 bench_server_opt
 webbench
+build/
 
 # Test directory binaries (any subdirectory)
 tests/*/server
@@ -30,6 +29,7 @@ tests/*/client[0-9]*
 .idea/
 *.swp
 *.swo
+*.trae
 *~
 
 # OS

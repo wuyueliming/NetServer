@@ -1,6 +1,6 @@
-#include "../../src/server/base/TcpSocket.hpp"
-#include "../../src/server/base/InetAddr.hpp"
-#include "../../src/server/base/LOGGER/log.h"
+#include "../../src/common/base/TcpSocket.hpp"
+#include "../../src/common/base/InetAddr.hpp"
+#include "../../src/common/base/Logger.hpp"
 #include <iostream>
 #include <cstring>
 

@@ -1,4 +1,4 @@
-#include "../src/protocol/HTTP/httpServer.hpp"
+#include "../examples/http_server/httpServer.hpp"
 
 // 使用 Log_bench.hpp 的 NullLogStrategy 替代核心 LOGGER（benchmark 模式消除日志开销）
 #undef LOG

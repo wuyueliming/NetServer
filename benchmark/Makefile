@@ -12,7 +12,9 @@ SRCS = $(SRCS_DIR)/Reactor.cc \
        $(SRCS_DIR)/Channel.cc \
        $(SRCS_DIR)/SignalHandler.cc \
        $(SRCS_DIR)/Connector.cc \
-       $(SRCS_DIR)/TcpClient.cc
+       $(SRCS_DIR)/TcpClient.cc \
+       $(SRCS_DIR)/frame/LineFrameDecoder.cc \
+       $(SRCS_DIR)/frame/LengthFieldFrameDecoder.cc
 
 # 编译服务器对象文件
 SRCS_OBJS = $(SRCS:.cc=.o)

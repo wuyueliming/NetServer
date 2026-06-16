@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -g -I../../src/server -I../../src/server/base
+CXXFLAGS = -std=c++17 -Wall -g -I../../src/server -I../../src/base
 
 SRCS_DIR = ../../src/server
 
@@ -11,7 +11,9 @@ SRCS = $(SRCS_DIR)/Reactor.cc \
        $(SRCS_DIR)/TcpConnection.cc \
        $(SRCS_DIR)/TimeWheel.cc \
        $(SRCS_DIR)/Channel.cc \
-       $(SRCS_DIR)/SignalHandler.cc
+       $(SRCS_DIR)/SignalHandler.cc \
+       $(SRCS_DIR)/frame/LineFrameDecoder.cc \
+       $(SRCS_DIR)/frame/LengthFieldFrameDecoder.cc
 
 all: server client
 

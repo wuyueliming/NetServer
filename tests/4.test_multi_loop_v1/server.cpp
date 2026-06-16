@@ -1,8 +1,8 @@
-#include "../../src/server/base/InetAddr.hpp"
-#include "../../src/server/base/LOGGER/log.h"
+#include "../../src/common/base/InetAddr.hpp"
+#include "../../src/common/base/Logger.hpp"
 #include "../../src/server/TcpServer.h"
-#include "../../src/server/Connection.h"
-#include "../../src/protocol/RawProtocolContext.hpp"
+#include "../../src/common/Connection.h"
+#include "../../src/common/FrameDecoder.hpp"
 #include <string>
 #include <thread>
 #include <mutex>
@@ -69,7 +69,6 @@ std::atomic<int> g_msg_count{0};
 
 //1.连接建立回调
 void OnConnected(ConnectionPtr conn) {
-    conn->SetContext(std::make_shared<RawProtocolContext>());
     g_conn_count++;
     LOG(INFO) << "New connection: " << conn->PeerAddr().StrAddr()
                         << " connID:" << conn->ID()
@@ -79,8 +78,7 @@ void OnConnected(ConnectionPtr conn) {
 //2.消息回调：将业务处理丢到线程池中
 void OnMessage(ConnectionPtr conn) {
     while (conn->HasMessage()) {
-        std::any msg = conn->Recv();
-        std::string str = std::any_cast<std::string>(std::move(msg));
+        std::string str = conn->Recv();
         g_msg_count++;
         //将回显业务丢到线程池中处理，模拟耗时业务
         g_pool->Push([conn, str = std::move(str)](){
@@ -135,6 +133,11 @@ int main() {
     //创建服务器
     TcpServer server(port);
     g_server = &server;
+
+    //设置帧解码器工厂
+    server.SetFrameDecoderFactory([]() -> std::unique_ptr<Aether::FrameDecoder> {
+        return std::make_unique<Aether::NoopFrameDecoder>();
+    });
 
     //设置从reactor线程数
     server.SetThreadCount(3);

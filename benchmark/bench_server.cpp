@@ -1,5 +1,5 @@
 #include "../src/protocol/HTTP/httpServer.hpp"
-#include "../src/server/base/LOGGER/log.h"
+#include "../src/base/Logger.hpp"
 #include <string>
 
 using namespace Aether;
