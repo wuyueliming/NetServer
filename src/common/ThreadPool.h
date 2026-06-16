@@ -10,7 +10,6 @@
 
 namespace Aether{
     using std::vector;
-    //ThreadPool ->LoopThread
     class ThreadPool : public noncopyable{
     public:
         ThreadPool(Reactor *masterloop);

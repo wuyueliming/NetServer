@@ -17,7 +17,6 @@
 
 namespace Aether{
 
-    //TcpServer ->Acceptor Reactor ThreadPool
     using std::unordered_map;
 
     static constexpr int kDefaultThreadNum = 5;

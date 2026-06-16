@@ -1,3 +1,4 @@
+
 # Compiled objects
 *.o
 *.d
@@ -15,26 +16,28 @@ client5
 client6
 bench_server
 bench_server_opt
+=======
 webbench
 build/
+>>>>>>> 0c7a6d5 (optimize)
 
-# Test directory binaries (any subdirectory)
-tests/*/server
-tests/*/client
-tests/*/client[1-9]*
-tests/*/client[0-9]*
+# Build artifacts
+*.o
+*.d
+*.so
+*.a
 
 # IDE
 .vscode/
 .idea/
+<<<<<<< HEAD
+=======
 *.swp
 *.swo
 *.trae
 *~
+>>>>>>> 0c7a6d5 (optimize)
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log

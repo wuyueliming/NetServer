@@ -12,7 +12,6 @@
 namespace Aether {
 
 // Connector：异步发起非阻塞 TCP 连接，支持指数退避重连
-// 参考 muduo::Connector 设计
 class Connector : public noncopyable,
                   public std::enable_shared_from_this<Connector> {
 public:

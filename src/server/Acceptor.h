@@ -13,7 +13,6 @@
 namespace Aether{
 
 
-    //Acceptor ->Socket Channel
     class Acceptor : public noncopyable{
         using ServerCallback = std::function<void(int fd, InetAddr addr)>;
     public:

@@ -11,10 +11,6 @@ namespace Aether {
 class Reactor;
 
 // SignalHandler：使用 signalfd 将信号转换为 fd 事件，集成到 Reactor
-// 设计理念（参考 Boost.Asio signal_set）：
-// 1. 将信号转换为 fd 事件，统一纳入 epoll 监控
-// 2. 避免信号处理函数的异步安全问题
-// 3. 支持在 Reactor 线程中安全地处理信号
 class SignalHandler {
 public:
     using SignalCallback = std::function<void()>;

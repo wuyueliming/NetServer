@@ -20,7 +20,6 @@ namespace Aether{
 
 
     using LoopTask = std::function<void()>;
-    //Reactor ->Epoller TimeQueue
     class Reactor : public noncopyable{
     public:
         Reactor();

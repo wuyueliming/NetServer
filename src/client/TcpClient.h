@@ -14,7 +14,6 @@
 namespace Aether {
 
 // TcpClient：异步 TCP 客户端
-// 参考 muduo::TcpClient 设计
 // 线程安全：connect/disconnect/stop 可在任意线程调用
 class TcpClient : public noncopyable {
 public:
