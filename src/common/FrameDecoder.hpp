@@ -8,7 +8,6 @@
 namespace Aether {
 
 // FrameDecoder：从字节流中切分出完整报文（粘包处理）
-// 职责单一：只做 Framing，不解析语义
 class FrameDecoder {
 public:
     virtual ~FrameDecoder() = default;
