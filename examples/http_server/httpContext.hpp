@@ -8,11 +8,9 @@
 #include "httpResponse.hpp"
 #include <Aether/FrameDecoder.hpp>
 
-// ============================================================================
-// HttpFrameDecoder：HTTP 粘包处理（会话层）
-// 从字节流中切分出完整的 HTTP 请求报文
-// 继承自 Aether::FrameDecoder，由框架的 FrameDecodeInLoop 调用
-// ============================================================================
+
+
+
 class HttpFrameDecoder : public Aether::FrameDecoder {
 public:
     HttpFrameDecoder() : _resp_status(200), _recv_status(RECV_HTTP_LINE) {}
@@ -224,10 +222,6 @@ private:
     HttpRequest _request;
 };
 
-// ============================================================================
-// HttpCodec：框架无关的 HTTP 编解码器（表示层）
-// 输入输出都是 std::string，不依赖任何 Aether 框架类型
-// ============================================================================
 class HttpCodec {
 public:
     // 解码：完整 HTTP 报文帧 → HttpRequest

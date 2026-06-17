@@ -22,7 +22,7 @@ class HttpServer {
         Handlers _delete_route;
         std::string _basedir; //静态资源根目录
         Aether::TcpServer _server;
-        HttpCodec _codec;                  // HTTP 编解码器（框架无关）
+        HttpCodec _codec;                  // HTTP 编解码器
     private:
         void ErrorHandler(const HttpRequest &req, HttpResponse *rsp) {
             //1. 组织一个错误展示页面
