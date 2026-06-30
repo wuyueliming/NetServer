@@ -1,6 +1,6 @@
-#include "../../src/common/base/TcpSocket.hpp"
-#include "../../src/common/base/InetAddr.hpp"
-#include "../../src/common/base/Logger.hpp"
+#include "../../src/common/TcpSocket.hpp"
+#include "../../src/common/InetAddr.hpp"
+#include "../../src/common/Logger.hpp"
 #include <iostream>
 #include <string>
 #include <thread>
@@ -8,7 +8,7 @@
 #include <atomic>
 #include <cstring>
 
-using namespace Aether;
+using namespace NetWork;
 
 std::atomic<int> g_echo_count{0};
 

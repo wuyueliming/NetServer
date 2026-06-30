@@ -1,13 +1,13 @@
 #include "SignalHandler.h"
-#include "Reactor.h"
-#include "base/Logger.hpp"
+#include "EventLoop.h"
+#include "Logger.hpp"
 #include <sys/signalfd.h>
 #include <unistd.h>
 #include <cstring>
 
-namespace Aether {
+namespace NetWork {
 
-SignalHandler::SignalHandler(Reactor *loop)
+SignalHandler::SignalHandler(EventLoop *loop)
 : _loop(loop),
   _sigfd(-1),
   _channel(loop, -1)
@@ -17,13 +17,15 @@ SignalHandler::SignalHandler(Reactor *loop)
 
 SignalHandler::~SignalHandler() {
     if (_sigfd >= 0) {
-        _channel.Remove();
+        // loop 已停止, 直接移除 channel (不走 Channel::Remove, 其 assert isInLoopThread)
+        _loop->RemoveEvent(&_channel);
         close(_sigfd);
         _sigfd = -1;
     }
 }
 
 void SignalHandler::Register(int signo, SignalCallback handler) {
+    std::lock_guard<std::mutex> lock(_mutex);
     sigaddset(&_mask, signo);
 
     // 如果 signalfd 已创建，更新其信号掩码
@@ -73,10 +75,15 @@ void SignalHandler::OnRead() {
             return;
         }
 
-        auto it = _handlers.find(fdsi.ssi_signo);
-        if (it != _handlers.end()) {
-            it->second();
+        SignalCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            auto it = _handlers.find(fdsi.ssi_signo);
+            if (it != _handlers.end()) {
+                cb = it->second;
+            }
         }
+        if (cb) cb();
     }
 }
 

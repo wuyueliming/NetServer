@@ -11,7 +11,7 @@
 #include "InetAddr.hpp"
 #include "noncopyable.hpp"
 
-namespace Aether {
+namespace NetWork {
 
 // Socket 基类：仅包含通用的 fd 管理和 socket 选项
 // TCP/UDP 专属功能分别由 TcpSocket/UdpSocket 实现
@@ -20,6 +20,20 @@ public:
     Socket() : _sockfd(-1) {}
     Socket(int fd) : _sockfd(fd) {}
     virtual ~Socket() { Close(); }
+
+    // 移动构造：转移 fd 所有权
+    Socket(Socket&& other) noexcept : _sockfd(other._sockfd) {
+        other._sockfd = -1;
+    }
+    // 移动赋值：转移 fd 所有权
+    Socket& operator=(Socket&& other) noexcept {
+        if (this != &other) {
+            Close();  // 先关闭当前 fd
+            _sockfd = other._sockfd;
+            other._sockfd = -1;
+        }
+        return *this;
+    }
 
     virtual int Fd() const { return _sockfd; }
     bool Close() {

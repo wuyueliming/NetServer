@@ -1,22 +1,25 @@
 // HTTP 服务器示例
-// 使用 Aether 网络库构建高性能 HTTP 服务器
+// 使用 NetWork 网络库构建高性能 HTTP 服务器
 
-#include <Aether/Aether.hpp>
+#include <NetWork/NetWork.hpp>
 #include "httpServer.hpp"
 
 int main() {
+    // 创建事件循环
+    NetWork::EventLoop loop;
+
     // 创建 HTTP 服务器，监听 8080 端口
-    HttpServer server(8080);
-    
+    HttpServer server(&loop, 8080);
+
     // 设置静态资源目录（可选）
     // server.SetBaseDir("./www");
-    
+
     // 设置工作线程数（默认为 CPU 核数）
     server.SetThreadCount(4);
-    
+
     // 注册路由处理器
     server.Get("/", [](const HttpRequest &req, HttpResponse *rsp) {
-        rsp->SetContent("<html><body><h1>Welcome to Aether HTTP Server</h1></body></html>");
+        rsp->SetContent("<html><body><h1>Welcome to NetWork HTTP Server</h1></body></html>");
     });
     
     server.Get("/api/hello", [](const HttpRequest &req, HttpResponse *rsp) {
@@ -30,7 +33,7 @@ int main() {
     
     // 启动服务器
     LOG(INFO) << "HTTP Server starting on port 8080";
-    server.Listen();
+    server.Listen();  // Listen() 内部调用 start()，阻塞
     
     return 0;
 }

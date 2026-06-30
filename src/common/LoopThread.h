@@ -3,26 +3,27 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
-#include "Reactor.h"
-#include "base/noncopyable.hpp"
+#include <string>
+#include "EventLoop.h"
+#include "noncopyable.hpp"
 
 
-namespace Aether{
+namespace NetWork{
 
     class LoopThread : public noncopyable{
     public:
-        LoopThread();/*创建线程，设定线程入口函数*/
+        LoopThread(const std::string& name = "");
         ~LoopThread();
-        Reactor *GetReactor();/*返回当前线程关联的 Reactor 对象指针*/
-        Reactor *GetLoop();/*返回 Reactor 内部的 Reactor 指针*/
+        EventLoop *getLoop();/*返回当前线程关联的 EventLoop 对象指针*/
         void Stop();/*停止线程*/
     private:
-        void Entry();/*实例化 Reactor 对象，唤醒_cond上有可能阻塞的线程，并且开始运行 Reactor 模块的功能*/
+        void Entry();/*实例化 EventLoop 对象，唤醒_cond上有可能阻塞的线程，并且开始运行 EventLoop 模块的功能*/
 
     private:
+        std::string _name;                     // 线程名称
         std::mutex _mutex;          // 互斥锁
-        std::condition_variable _cond;   // 条件变量，用于实现 _reactor 获取的同步关系
-        Reactor *_reactor;          // Reactor 指针，对象在线程内实例化
+        std::condition_variable _cond;   // 条件变量，用于实现 _loop 获取的同步关系
+        EventLoop* _loop;          // EventLoop 指针，对象在线程内实例化
         std::thread _thread;        // 线程
     };
 

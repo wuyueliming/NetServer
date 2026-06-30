@@ -4,18 +4,19 @@
 #include <functional>
 #include <unordered_map>
 #include <vector>
+#include <mutex>
 #include "Channel.h"
 
-namespace Aether {
+namespace NetWork {
 
-class Reactor;
+class EventLoop;
 
-// SignalHandler：使用 signalfd 将信号转换为 fd 事件，集成到 Reactor
+// SignalHandler：使用 signalfd 将信号转换为 fd 事件，集成到 EventLoop
 class SignalHandler {
 public:
     using SignalCallback = std::function<void()>;
 
-    explicit SignalHandler(Reactor *loop);
+    explicit SignalHandler(EventLoop *loop);
     ~SignalHandler();
 
     // 注册信号处理函数
@@ -28,11 +29,12 @@ public:
 private:
     void OnRead();  // signalfd 可读回调
 
-    Reactor *_loop;
+    EventLoop *_loop;
     int _sigfd;
     Channel _channel;
     sigset_t _mask;
     std::unordered_map<int, SignalCallback> _handlers;
+    std::mutex _mutex;  // 保护 _handlers 和 _mask 的线程安全
 };
 
 }

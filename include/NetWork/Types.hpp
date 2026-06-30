@@ -5,7 +5,7 @@
 #include <string>
 #include <cstdint>
 
-namespace Aether {
+namespace NetWork {
 
 // 连接标识符
 using ConnectionID = uint64_t;
@@ -17,14 +17,9 @@ using ConnectionWeakPtr = std::weak_ptr<Connection>;
 
 // 应用层回调类型
 using AppLayerCallback = std::function<void(ConnectionPtr)>;
-using HighWaterMarkCallback = std::function<void(ConnectionPtr, size_t)>;
 using WriteCompleteCallback = std::function<void(ConnectionPtr)>;
-using ServerCallback = std::function<void(ConnectionID, class Reactor*)>;
-
-// FrameDecoder 工厂类型
-class FrameDecoder;
-using FrameDecoderFactory = std::function<std::unique_ptr<FrameDecoder>()>;
+using ServerCallback = std::function<void(ConnectionID, class EventLoop*)>;
 
 // ConnectionState 定义在 Connection.hpp 中
 
-} // namespace Aether
+} // namespace NetWork

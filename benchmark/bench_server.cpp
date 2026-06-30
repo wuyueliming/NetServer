@@ -1,11 +1,12 @@
 #include "../src/protocol/HTTP/httpServer.hpp"
-#include "../src/base/Logger.hpp"
+#include "../src/common/Logger.hpp"
 #include <string>
 
-using namespace Aether;
+using namespace NetWork;
 
 int main() {
-    HttpServer server(8080, 60);
+    NetWork::Reactor loop;
+    HttpServer server(&loop, 8080, 60);
     server.SetThreadCount(4);
     server.SetBaseDir("./wwwroot");
 
@@ -24,6 +25,7 @@ int main() {
 
     LOG(INFO) << "Bench Server starting on port 8080 (4 IO threads)";
     server.Listen();
+    loop.loop();
 
     return 0;
 }

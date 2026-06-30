@@ -3,7 +3,7 @@
 #include "Socket.hpp"
 #include <netinet/tcp.h>
 
-namespace Aether {
+namespace NetWork {
 
 // TcpSocket：TCP 专属功能
 // create(SOCK_STREAM) / listen / accept / connect / recv / send / SetDeferAccept

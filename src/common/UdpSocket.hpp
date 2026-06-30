@@ -2,7 +2,7 @@
 
 #include "Socket.hpp"
 
-namespace Aether {
+namespace NetWork {
 
 // UdpSocket：UDP 专属功能
 // create(SOCK_DGRAM) / RecvFrom / SendTo / create_udp_server

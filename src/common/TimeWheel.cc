@@ -1,9 +1,9 @@
 #include "TimeWheel.h"
-#include "Reactor.h"
+#include "EventLoop.h"
 
-namespace Aether
+namespace NetWork
 {
-    TimeWheel::TimeWheel(Reactor* loop)
+    TimeWheel::TimeWheel(EventLoop* loop)
         : _loop(loop),_timer(),_channel(loop, -1),_tick_sec(0),_tick_min(0),_nextid(1),
           _sec_wheel(MAX_SECONDS),_min_wheel(MAX_MINUTES)
     {
@@ -86,9 +86,8 @@ namespace Aether
         TaskID id = _nextid++;
         if(timeout == 0){
             function();
-            // 即使 timeout == 0，也返回有效 ID（后续操作时 taskmap 找不到就无事）
             if(out_id != nullptr){
-                *out_id = id;
+                *out_id = 0;  // 0 表示无效 id（立即执行的任务不支持取消）
             }
             return;
         }
@@ -133,15 +132,22 @@ namespace Aether
             return;
         }
 
-        // 使用绝对时间计算新的目标位置
+        // 刷新逻辑: 直接在新的位置上插入同一个 shared_ptr
+        // 旧槽位 tick 到期清空时 refcount-- 但不归零 (新槽位还持有副本),
+        // 因此旧任务析构不会触发, 只有新槽位到期才触发 function。
+        // _taskmap 无需改动 (仍指向同一个 task)。
+        if(timeout > (uint32_t)MAX_TIMEOUT){
+            LOG(ERROR) << "Timeout " << timeout << "s exceeds max " << MAX_TIMEOUT << "s, clamped";
+            timeout = MAX_TIMEOUT;
+        }
+
         uint32_t absolute_fire = _tick_min * MAX_SECONDS + _tick_sec + timeout;
         uint32_t fire_sec = absolute_fire % MAX_SECONDS;
         uint32_t total_minutes = absolute_fire / MAX_SECONDS;
 
-        // 直接复用原任务，更新内部状态后放入新位置
-        // 同一EventLoop线程内，刷新期间旧位置不会被异步析构
-        ptask->SetTimeout(timeout);
+        // 更新 fire_sec 与 timeout, 供分针降级时定位秒轮槽位使用
         ptask->SetFireSec(fire_sec);
+        ptask->SetTimeout(timeout);
 
         if(total_minutes == (uint32_t)_tick_min || timeout < MAX_SECONDS){
             _sec_wheel[fire_sec].push_back(ptask);
@@ -165,6 +171,8 @@ namespace Aether
     }
 
     bool TimeWheel::HasTimer(uint64_t id) {
+        // 必须在 EventLoop 线程调用，否则需要通过 runInLoop 串行化
+        assert(_loop->isInLoopThread());
         auto it = _taskmap.find(id);
         if (it == _taskmap.end()) {
             return false;

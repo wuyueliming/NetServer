@@ -9,7 +9,7 @@
 #include "Logger.hpp"
 #include "noncopyable.hpp"
 
-namespace Aether
+namespace NetWork
 {
 
     static constexpr size_t kDefaultBufferSize = 1024;
@@ -112,12 +112,13 @@ class Buffer : public noncopyable {
             Read(&str[0], len);
             return str;
         }
-        std::string ReadAsStringAndPop(uint64_t len) {
-            assert(len <= ReadAbleSize());
+        std::string ReadAsStringAndPop(size_t len) {
+            if (ReadAbleSize() < len) return "";
             std::string str = ReadAsString(len);
             MoveReadOffset(len);
             return str;
         }
+
         char *FindLF() {
             char *res = (char*)memchr(ReadPosition(), '\n', ReadAbleSize());
             return res;
@@ -141,6 +142,12 @@ class Buffer : public noncopyable {
             //只需要将偏移量归0即可（保留 prepend 空间）
             _read_idx = kCheapPrepend;
             _write_idx = kCheapPrepend;
+            // 内存收缩优化：大流量后内存长期占用，当空闲空间超过阈值时收缩
+            static constexpr size_t kShrinkThreshold = 64 * 1024;  // 64KB 阈值
+            if (_buffer.size() > kDefaultBufferSize + kCheapPrepend + kShrinkThreshold) {
+                _buffer.resize(kDefaultBufferSize + kCheapPrepend);
+                _buffer.shrink_to_fit();
+            }
         }
 
         // ===== Prepend 支持 =====

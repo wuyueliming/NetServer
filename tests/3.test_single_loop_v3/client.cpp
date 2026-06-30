@@ -1,10 +1,10 @@
-#include "../../src/common/base/TcpSocket.hpp"
-#include "../../src/common/base/InetAddr.hpp"
-#include "../../src/common/base/Logger.hpp"
+#include "../../src/common/TcpSocket.hpp"
+#include "../../src/common/InetAddr.hpp"
+#include "../../src/common/Logger.hpp"
 #include <iostream>
 #include <cstring>
 
-using namespace Aether;
+using namespace NetWork;
 
 int main()
 {

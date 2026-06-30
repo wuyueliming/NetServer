@@ -7,7 +7,7 @@ SRCS = $(SRCS_DIR)/Reactor.cc \
        $(SRCS_DIR)/TcpServer.cc \
        $(SRCS_DIR)/TcpConnection.cc \
        $(SRCS_DIR)/LoopThread.cc \
-       $(SRCS_DIR)/ThreadPool.cc \
+       $(SRCS_DIR)/LoopThreadPool.cc \
        $(SRCS_DIR)/TimeWheel.cc \
        $(SRCS_DIR)/Channel.cc \
        $(SRCS_DIR)/SignalHandler.cc \

@@ -10,10 +10,10 @@
 #include<stdexcept>
 #include"Logger.hpp"
 #include"noncopyable.hpp"
-#include"../Channel.h"
+#include"Channel.h"
 
 
-namespace Aether
+namespace NetWork
 {
     using std::unordered_map;
     using std::vector;
@@ -93,6 +93,11 @@ namespace Aether
                 ch->set_revents(_evs[i].events);
                 Actives.push_back(ch);
             }
+        }
+
+        // 获取当前监听的 Channel 数量（用于负载均衡）
+        size_t ChannelCount() const {
+            return _channels.size();
         }
 
 

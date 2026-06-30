@@ -7,8 +7,8 @@
 #include "Util.hpp"
 #include "httpContext.hpp"
 #include "httpResponse.hpp"
-#include <Aether/TcpServer.hpp>
-#include <Aether/Connection.hpp>
+#include <NetWork/TcpServer.hpp>
+#include <NetWork/Connection.hpp>
 
 #define DEFAULT_TIMEOUT 60
 
@@ -21,8 +21,7 @@ class HttpServer {
         Handlers _put_route;
         Handlers _delete_route;
         std::string _basedir; //静态资源根目录
-        Aether::TcpServer _server;
-        HttpCodec _codec;                  // HTTP 编解码器
+        NetWork::TcpServer _server;
     private:
         void ErrorHandler(const HttpRequest &req, HttpResponse *rsp) {
             //1. 组织一个错误展示页面
@@ -43,7 +42,7 @@ class HttpServer {
             rsp->SetContent(body, "text/html");
         }
         //将HttpResponse中的要素按照http协议格式进行组织，发送
-        void WriteResponse(const Aether::ConnectionPtr &conn, const HttpRequest &req, HttpResponse &rsp) {
+        void WriteResponse(const NetWork::ConnectionPtr &conn, const HttpRequest &req, HttpResponse &rsp) {
             //1. 先完善头部字段
             if (req.Close() == true) {
                 rsp.SetHeader("Connection", "close");
@@ -130,42 +129,57 @@ class HttpServer {
             rsp->_status = 405;
             return ;
         }
-        //消息回调：从 FrameDecoder 获取完整帧，用 HttpCodec 解析
-        void OnMessage(const Aether::ConnectionPtr &conn) {
-            while (conn->HasMessage()) {
-                std::string frame = conn->Recv();
-
-                // 空帧表示解析错误
-                if (frame.empty()) {
-                    HttpRequest req;
-                    HttpResponse rsp(400);
-                    ErrorHandler(req, &rsp);
+        //连接建立回调：设置 HttpContext 到连接的 context
+        void OnConnected(const NetWork::ConnectionPtr &conn) {
+            conn->setContext(HttpContext());
+        }
+        //消息回调：从 Buffer 解析 HTTP 请求
+        void OnMessage(const NetWork::ConnectionPtr &conn) {
+            auto* ctx = std::any_cast<HttpContext>(conn->getMutableContext());
+            if (!ctx) {
+                // context 未设置，发送错误响应
+                HttpRequest empty_req;
+                HttpResponse rsp(400);
+                ErrorHandler(empty_req, &rsp);
+                WriteResponse(conn, empty_req, rsp);
+                conn->Shutdown();
+                return;
+            }
+            NetWork::Buffer* buf = conn->ReadBuffer();
+            while (buf->ReadAbleSize() > 0) {
+                if (!ctx->ParseRequest(buf)) {
+                    // 解析错误
+                    HttpRequest empty_req;
+                    HttpResponse rsp(ctx->GetErrorStatus());
+                    ErrorHandler(empty_req, &rsp);
+                    WriteResponse(conn, empty_req, rsp);
+                    conn->Shutdown();
+                    return;
+                }
+                if (ctx->GotAll()) {
+                    HttpRequest& req = ctx->GetRequest();
+                    HttpResponse rsp(200);
+                    Route(req, &rsp);
+                    if (rsp._status >= 400) {
+                        ErrorHandler(req, &rsp);
+                    }
                     WriteResponse(conn, req, rsp);
-                    conn->Shutdown();
-                    return;
-                }
-
-                // 用 HttpCodec 解码帧
-                HttpRequest req = HttpCodec::Decode(frame);
-                HttpResponse rsp(200);
-                Route(req, &rsp);
-                if (rsp._status >= 400) {
-                    ErrorHandler(req, &rsp);
-                }
-                WriteResponse(conn, req, rsp);
-                if (rsp.Close() == true) {
-                    conn->Shutdown();
-                    return;
+                    if (rsp.Close() == true) {
+                        conn->Shutdown();
+                        return;
+                    }
+                    ctx->Reset();  // 重置状态，处理下一个请求
+                } else {
+                    // 数据不够，等待下次 OnMessage
+                    break;
                 }
             }
         }
     public:
-        HttpServer(int port, int timeout = DEFAULT_TIMEOUT):_server(port) {
-            _server.EnableInactiveRelease(timeout);
-            _server.SetFrameDecoderFactory([]() -> std::unique_ptr<Aether::FrameDecoder> {
-                return std::make_unique<HttpFrameDecoder>();
-            });
-            _server.SetMessageCallback(std::bind(&HttpServer::OnMessage, this, std::placeholders::_1));
+        HttpServer(NetWork::EventLoop* loop, int port, int timeout = DEFAULT_TIMEOUT):_server(loop, port) {
+            _server.enableInactiveRelease(timeout);
+            _server.setConnectionCallback(std::bind(&HttpServer::OnConnected, this, std::placeholders::_1));
+            _server.setMessageCallback(std::bind(&HttpServer::OnMessage, this, std::placeholders::_1));
         }
         void SetBaseDir(const std::string &path) {
             if (Util::IsDirectory(path) == false) {
@@ -188,7 +202,7 @@ class HttpServer {
             _delete_route.push_back(std::make_pair(std::regex(pattern), handler));
         }
         void SetThreadCount(int count) {
-            _server.SetThreadCount(count);
+            _server.setThreadNum(count);
         }
         void Listen() {
             _server.start();

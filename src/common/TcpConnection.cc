@@ -1,12 +1,18 @@
 #include "TcpConnection.h"
-#include "base/WeakCallback.hpp"
+#include "WeakCallback.hpp"
+#include <csignal>
 
-namespace Aether {
+namespace NetWork {
 
-    TcpConnection::TcpConnection(Reactor *loop, ConnectionID id, int fd, InetAddr addr)
+    // 初始化时屏蔽 SIGPIPE（防止 write/writev 对已关闭连接触发 SIGPIPE）
+    static struct SigPipeInit {
+        SigPipeInit() { ::signal(SIGPIPE, SIG_IGN); }
+    } sigPipeInit;
+
+    TcpConnection::TcpConnection(EventLoop *loop, ConnectionID id, int fd, InetAddr addr)
         : Connection(id, addr),
           _ioSock(fd), _loop(loop), _channel(loop, fd),
-          _enable_inactive_release(false), _timeout(0), _releaseTaskId(-1)
+          _enable_inactive_release(false), _timeout(0), _releaseTaskId(INVALID_TASK_ID)
     {
         // ET模式设置非阻塞
         _ioSock.SetNonBlock();
@@ -33,7 +39,6 @@ namespace Aether {
             } else if (ret == 0) {
                 // 对端关闭连接
                 if (_inBuffer.ReadAbleSize() > 0) {
-                    FrameDecodeInLoop();
                     if (_onMessage_Callback) {
                         _onMessage_Callback(shared_from_this());
                     }
@@ -63,8 +68,8 @@ namespace Aether {
                 return Release();
             }
         }
+        // 直接调用回调，不切帧
         if (_inBuffer.ReadAbleSize() > 0) {
-            FrameDecodeInLoop();
             if (_onMessage_Callback) {
                 _onMessage_Callback(shared_from_this());
             }
@@ -110,7 +115,6 @@ namespace Aether {
     void TcpConnection::OnClose() {
         /*一旦连接挂断了，套接字就什么都干不了了，因此有数据待处理就处理一下，完毕关闭连接*/
         if (_inBuffer.ReadAbleSize() > 0) {
-            FrameDecodeInLoop();
             if (_onMessage_Callback) {
                 _onMessage_Callback(shared_from_this());
             }
@@ -152,7 +156,8 @@ namespace Aether {
     }
 
     void TcpConnection::Release() {
-        _loop->runInLoop([this]() { ReleaseInLoop(); });
+        // 捕获 shared_ptr 而非裸指针, 防止任务执行前 TcpConnection 被析构 (use-after-free)
+        _loop->runInLoop([self = std::static_pointer_cast<TcpConnection>(shared_from_this())]() { self->ReleaseInLoop(); });
     }
 
     void TcpConnection::Send(const void *data, size_t len) {
@@ -181,25 +186,6 @@ namespace Aether {
         }
     }
 
-    std::string TcpConnection::Recv() {
-        assert(_loop->isInLoopThread() && "Recv() must be called in IO loop thread");
-        if (_frames.empty()) return std::string();
-        std::string frame = std::move(_frames.front());
-        _frames.pop();
-        return frame;
-    }
-
-    bool TcpConnection::HasMessage() {
-        assert(_loop->isInLoopThread() && "HasMessage() must be called in IO loop thread");
-        return !_frames.empty();
-    }
-
-    void TcpConnection::SetFrameDecoder(std::unique_ptr<FrameDecoder> decoder) {
-        // SetFrameDecoder 在 Established() 之前调用，此时连接还未开始读取
-        // 可以直接设置，无需 runInLoop（避免 unique_ptr 不可拷贝的问题）
-        _frame_decoder = std::move(decoder);
-    }
-
     void TcpConnection::EnableInactiveRelease(uint32_t timeout) {
         _loop->runInLoop([this, timeout]() { EnableInactiveReleaseInLoop(timeout); });
     }
@@ -223,7 +209,6 @@ namespace Aether {
         _state.store(static_cast<int>(ConnectionState::DISCONNECTING));
         // 处理输入缓冲区剩余数据
         if (_inBuffer.ReadAbleSize() > 0) {
-            FrameDecodeInLoop();
             if (_onMessage_Callback) {
                 _onMessage_Callback(shared_from_this());
             }
@@ -286,7 +271,7 @@ namespace Aether {
             struct iovec vec[2];
             vec[0].iov_base = _outBuffer.ReadPosition();
             vec[0].iov_len = _outBuffer.ReadAbleSize();
-            vec[1].iov_base = (void*)data;
+            vec[1].iov_base = (void*)data;  // writev 要求非 const 指针，此处强转安全
             vec[1].iov_len = len;
 
             ssize_t n = ::writev(_ioSock.Fd(), vec, 2);
@@ -322,12 +307,6 @@ namespace Aether {
             _outBuffer.WriteAndPush(data, len);
         }
 
-        // 高水位检查
-        size_t total = _outBuffer.ReadAbleSize();
-        if (total >= _highWaterMark && _highWaterMarkCallback) {
-            _highWaterMarkCallback(shared_from_this(), total);
-        }
-
         if (!_channel.WriteAble()) {
             _channel.EnableWriteET();
         }
@@ -348,21 +327,11 @@ namespace Aether {
         _loop->CancelTimedTask(_releaseTaskId);
     }
 
-    void TcpConnection::FrameDecodeInLoop() {
-        if (_frame_decoder == nullptr) return;
-        while (true) {
-            std::string frame;
-            bool ok = _frame_decoder->TryDecode(_inBuffer, frame);
-            if (!ok) break;
-            _frames.push(std::move(frame));
-        }
-    }
-
-    void TcpConnection::MigrateTo(Reactor *new_loop) {
+    void TcpConnection::MigrateTo(EventLoop *new_loop) {
         _loop->runInLoop([this, new_loop]() { MigrateToInLoop(new_loop); });
     }
 
-    void TcpConnection::MigrateToInLoop(Reactor *new_loop) {
+    void TcpConnection::MigrateToInLoop(EventLoop *new_loop) {
         if (_loop == new_loop) return;  // 无需迁移
         // 1. 取消旧定时器
         if (_enable_inactive_release && _loop->existTask(_releaseTaskId)) {
@@ -381,6 +350,29 @@ namespace Aether {
                 _loop->AddTimedTask(_timeout, MakeWeakCallback(std::static_pointer_cast<TcpConnection>(shared_from_this()), &TcpConnection::ReleaseInLoop), &_releaseTaskId);
             }
         });
+    }
+
+    // 协议升级：同时更新 context 和回调函数，保证原子性
+    void TcpConnection::Upgrade(const std::any& context,
+                                const AppLayerCallback& connected_cb,
+                                const AppLayerCallback& message_cb,
+                                const AppLayerCallback& closed_cb,
+                                const AppLayerCallback& event_cb) {
+        _loop->runInLoop([this, context, connected_cb, message_cb, closed_cb, event_cb]() {
+            UpgradeInLoop(context, connected_cb, message_cb, closed_cb, event_cb);
+        });
+    }
+
+    void TcpConnection::UpgradeInLoop(const std::any& context,
+                                      const AppLayerCallback& connected_cb,
+                                      const AppLayerCallback& message_cb,
+                                      const AppLayerCallback& closed_cb,
+                                      const AppLayerCallback& event_cb) {
+        _context = context;
+        _onConnected_Callback = connected_cb;
+        _onMessage_Callback = message_cb;
+        _onClosed_Callback = closed_cb;
+        _onEvent_Callback = event_cb;
     }
 
 }

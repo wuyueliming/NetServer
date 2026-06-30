@@ -1,22 +1,22 @@
 #pragma once
 
-#include "base/InetAddr.hpp"
-#include "Channel.h"
-#include "base/TcpSocket.hpp"
-#include "Reactor.h"
-#include "base/noncopyable.hpp"
+#include "../common/InetAddr.hpp"
+#include "../common/Channel.h"
+#include "../common/TcpSocket.hpp"
+#include "../common/EventLoop.h"
+#include "../common/noncopyable.hpp"
 #include <functional>
 #include <cassert>
 #include <fcntl.h>
 
 
-namespace Aether{
+namespace NetWork{
 
 
     class Acceptor : public noncopyable{
         using ServerCallback = std::function<void(int fd, InetAddr addr)>;
     public:
-        Acceptor(int port, Reactor *loop, bool defer_accept = false);
+        Acceptor(int port, EventLoop *loop, bool defer_accept = false);
         ~Acceptor();
         //1.设置accept新连接后的回调函数，用于server管理新连接
         void SetAcceptCallback(const ServerCallback& cb);
@@ -31,7 +31,7 @@ namespace Aether{
     private:
         //管理监听套接字
         TcpSocket _listenSock;
-        Reactor* _loop;
+        EventLoop* _loop;
         Channel _channel;
         //server callback
         ServerCallback _acceptCallback;//accpet后在server中管理连接

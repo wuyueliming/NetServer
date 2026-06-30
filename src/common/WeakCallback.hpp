@@ -3,11 +3,10 @@
 #include <memory>
 #include <functional>
 
-namespace Aether {
+namespace NetWork {
 
 // WeakCallback：用于定时器回调中避免延长对象生命周期
-// 设计理念：持有 weak_ptr，回调时尝试提升为 shared_ptr
-// 如果对象已销毁，回调静默跳过，避免访问已析构对象
+// 回调时尝试提升为 shared_ptr，如果对象已销毁，回调静默跳过，避免访问已析构对象
 template<typename CLASS, typename... ARGS>
 class WeakCallback {
 public:

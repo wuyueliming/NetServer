@@ -7,15 +7,15 @@
 #include<unordered_map>
 #include<functional>
 #include<memory>
-#include "base/Logger.hpp"
-#include"base/Timer.hpp"
-#include"base/noncopyable.hpp"
+#include "Logger.hpp"
+#include"Timer.hpp"
+#include"noncopyable.hpp"
 #include"Channel.h"
 
-class Reactor;
+class EventLoop;
 
 
-namespace Aether
+namespace NetWork
 {
 
     static constexpr int MAX_SECONDS = 60;
@@ -86,7 +86,7 @@ namespace Aether
     class TimeWheel : public noncopyable
     {
     public:
-        TimeWheel(Reactor* loop);
+        TimeWheel(EventLoop* loop);
         ~TimeWheel();
 
         void run();
@@ -111,7 +111,7 @@ namespace Aether
         void CancelTaskInLoop(TaskID id);
 
     private:
-        Reactor *_loop;
+        EventLoop *_loop;
         Timer _timer;
         Channel _channel;
 

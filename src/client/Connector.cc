@@ -8,14 +8,14 @@
 #include <errno.h>
 #include <cstring>
 
-namespace Aether {
+namespace NetWork {
 
 
 
 const int Connector::kInitRetryDelayMs;
 const int Connector::kMaxRetryDelayMs;
 
-Connector::Connector(Reactor* loop, const InetAddr& serverAddr)
+Connector::Connector(EventLoop* loop, const InetAddr& serverAddr)
     : _loop(loop),
       _serverAddr(serverAddr),
       _connect(false),
@@ -129,8 +129,16 @@ void Connector::connect() {
 void Connector::connecting(int sockfd) {
     setState(kConnecting);
     _channel.reset(new Channel(_loop, sockfd));
-    _channel->SetWriteCallback([this]() { handleWrite(); });
-    _channel->SetErrorCallback([this]() { handleError(); });
+    // 使用 weak_ptr 捕获，防止 Connector 被销毁后回调悬空
+    std::weak_ptr<Connector> weak_self = shared_from_this();
+    _channel->SetWriteCallback([weak_self]() {
+        auto self = weak_self.lock();
+        if (self) self->handleWrite();
+    });
+    _channel->SetErrorCallback([weak_self]() {
+        auto self = weak_self.lock();
+        if (self) self->handleError();
+    });
     _channel->EnableWriteET();
 }
 
@@ -194,10 +202,10 @@ void Connector::retry(int sockfd) {
     if (_connect.load(std::memory_order_relaxed)) {
         LOG(INFO) << "Retry connecting to " << _serverAddr.StrAddr()
                   << " in " << _retryDelayMs << "ms";
-        _loop->AddTimedTask(_retryDelayMs / 1000,
+        _loop->AddTimedTask((_retryDelayMs + 999) / 1000,
             [self = shared_from_this()]() { self->startInLoop(); });
         _retryDelayMs = std::min(_retryDelayMs * 2, kMaxRetryDelayMs);
     }
 }
 
-} // namespace Aether
+} // namespace NetWork

@@ -7,7 +7,7 @@
 #include <string>
 #include <cstdlib>
 
-using namespace Aether;
+using namespace NetWork;
 
 int main() {
     // 性能测试版本：禁用日志以减少开销
@@ -23,7 +23,8 @@ int main() {
     int threads = get_env("BENCH_THREADS", 4);
     int timeout = get_env("BENCH_TIMEOUT", 60);
 
-    HttpServer server(port, timeout);
+    NetWork::EventLoop loop;
+    HttpServer server(&loop, port, timeout);
     server.SetThreadCount(threads);
     server.SetBaseDir("./wwwroot");
 
@@ -40,7 +41,8 @@ int main() {
         rsp->SetContent(body, "text/plain");
     });
 
-    server.Listen();
+    server.Listen();  // Listen() 内部调用 start()，仅开始监听
+    loop.loop();      // 用户自行调用，阻塞在此
 
     return 0;
 }

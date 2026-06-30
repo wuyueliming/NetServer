@@ -1,19 +1,16 @@
 #include "TcpClient.h"
 
-#include "base/Logger.hpp"
+#include "Logger.hpp"
 
 #include <cassert>
 #include <cstdio>
 
-namespace Aether {
+namespace NetWork {
 
-TcpClient::TcpClient(Reactor* loop, const InetAddr& serverAddr, const std::string& name)
+TcpClient::TcpClient(EventLoop* loop, const InetAddr& serverAddr, const std::string& name)
     : _loop(loop),
       _connector(std::make_shared<Connector>(loop, serverAddr)),
-      _name(name),
-      _retry(false),
-      _connect(false),
-      _nextConnId(1)
+      _name(name)
 {
     _connector->setNewConnectionCallback(
         [this](int sockfd) { newConnection(sockfd); });
@@ -22,24 +19,15 @@ TcpClient::TcpClient(Reactor* loop, const InetAddr& serverAddr, const std::strin
 
 TcpClient::~TcpClient() {
     LOG(INFO) << "TcpClient[" << _name << "] destructing";
-    // 析构时清理连接
-    std::shared_ptr<TcpConnection> conn;
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-        conn = _connection;
-    }
-
-    if (conn) {
-        // 连接存在，在 IO 线程中强制释放
-        conn->Release();
-    } else {
-        // 无连接时，停止 Connector
-        _connector->stop();
-    }
+    stop();
 }
 
 void TcpClient::connect() {
+    if (_started.load()) return;
+    _started.store(true);
     _connect.store(true, std::memory_order_relaxed);
+
+    // 发起连接，不创建线程运行 loop()，由用户自行调用 _loop->loop()
     _connector->start();
 }
 
@@ -57,7 +45,25 @@ void TcpClient::disconnect() {
 
 void TcpClient::stop() {
     _connect.store(false, std::memory_order_relaxed);
+    if (!_started.load()) return;
+
+    // 1. 停止 Connector
     _connector->stop();
+
+    // 2. 断开连接
+    std::shared_ptr<TcpConnection> conn;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        conn = _connection;
+    }
+    if (conn) {
+        conn->Release();
+    }
+
+    // 3. 退出 EventLoop
+    _loop->Quit();
+
+    _started.store(false);
 }
 
 std::shared_ptr<TcpConnection> TcpClient::connection() const {
@@ -108,6 +114,11 @@ void TcpClient::removeConnection(const std::shared_ptr<TcpConnection>& conn) {
         }
     }
 
+    // 通知上层连接已断开 (conn 此时已 DISCONNECTED, isConnected()==false)
+    if (_connectionCallback) {
+        _connectionCallback(conn);
+    }
+
     // 自动重连
     if (_retry.load(std::memory_order_relaxed) && _connect.load(std::memory_order_relaxed)) {
         LOG(INFO) << "TcpClient[" << _name << "] reconnecting to "
@@ -116,4 +127,4 @@ void TcpClient::removeConnection(const std::shared_ptr<TcpConnection>& conn) {
     }
 }
 
-} // namespace Aether
+} // namespace NetWork

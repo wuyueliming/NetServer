@@ -10,4 +10,4 @@ target_include_directories(http_server_example PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
-target_link_libraries(http_server_example PRIVATE aether_core)
+target_link_libraries(http_server_example PRIVATE network_core)

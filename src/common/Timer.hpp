@@ -3,11 +3,13 @@
 #include <unistd.h>
 #include <sys/timerfd.h>
 #include "Logger.hpp"
+#include "noncopyable.hpp"
 
-namespace Aether
+namespace NetWork
 {
 
-    class Timer
+    // Timer：封装 timerfd，不可拷贝（继承 noncopyable）
+    class Timer : public noncopyable
     {
     public:
         Timer():_timerfd(-1){}

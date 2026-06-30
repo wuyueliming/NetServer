@@ -1,8 +1,7 @@
-#include "../../src/common/base/InetAddr.hpp"
-#include "../../src/common/base/Logger.hpp"
+#include "../../src/common/InetAddr.hpp"
+#include "../../src/common/Logger.hpp"
 #include "../../src/server/TcpServer.h"
 #include "../../src/common/Connection.h"
-#include "../../src/common/FrameDecoder.hpp"
 #include <string>
 #include <thread>
 #include <mutex>
@@ -10,7 +9,7 @@
 #include <deque>
 #include <atomic>
 
-using namespace Aether;
+using namespace NetWork;
 
 //线程池：模拟业务线程池，处理接收到的数据
 class BusinessPool {
@@ -77,8 +76,9 @@ void OnConnected(ConnectionPtr conn) {
 
 //2.消息回调：将业务处理丢到线程池中
 void OnMessage(ConnectionPtr conn) {
-    while (conn->HasMessage()) {
-        std::string str = conn->Recv();
+    Buffer* buf = conn->ReadBuffer();
+    if (buf->ReadAbleSize() > 0) {
+        std::string str = buf->ReadAsStringAndPop(buf->ReadAbleSize());
         g_msg_count++;
         //将回显业务丢到线程池中处理，模拟耗时业务
         g_pool->Push([conn, str = std::move(str)](){
@@ -131,25 +131,21 @@ int main() {
     g_pool = &pool;
 
     //创建服务器
-    TcpServer server(port);
+    NetWork::EventLoop loop;
+    TcpServer server(&loop, port);
     g_server = &server;
 
-    //设置帧解码器工厂
-    server.SetFrameDecoderFactory([]() -> std::unique_ptr<Aether::FrameDecoder> {
-        return std::make_unique<Aether::NoopFrameDecoder>();
-    });
-
-    //设置从reactor线程数
-    server.SetThreadCount(3);
+    //设置从 EventLoop 线程数
+    server.setThreadNum(3);
 
     //设置超时销毁：30秒无活动则断开
-    server.EnableInactiveRelease(30);
+    server.enableInactiveRelease(30);
 
     //注册回调
-    server.SetConnectedCallback(OnConnected);
-    server.SetMessageCallback(OnMessage);
-    server.SetClosedCallback(OnClosed);
-    server.SetEventCallback(OnEvent);
+    server.setConnectionCallback(OnConnected);
+    server.setMessageCallback(OnMessage);
+    server.setCloseCallback(OnClosed);
+    server.setEventCallback(OnEvent);
 
     //注册定时任务
     server.AddTimedTask(HeartbeatTask, 3);
@@ -158,7 +154,8 @@ int main() {
     LOG(INFO) << "Echo Server starting on port " << port
                         << " with 3 sub-reactors and 4 business threads";
 
-    server.start();
+    server.start();  // 仅开始监听，不创建线程
+    loop.loop();     // 用户自行调用，阻塞在此
 
     return 0;
 }

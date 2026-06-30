@@ -9,7 +9,7 @@
 
 
 
-namespace Aether{
+namespace NetWork{
 
     class InetAddr{
         using string = std::string;
@@ -24,8 +24,12 @@ namespace Aether{
         ///主机序列ip和port的构造函数
         InetAddr(int port, string ip="0.0.0.0"){
             _addr.sin_family = AF_INET;
-            _addr.sin_addr.s_addr = inet_addr(ip.c_str());
             _addr.sin_port = htons(port);
+            // 使用 inet_pton 替代 inet_addr（inet_addr 无法区分错误与广播地址）
+            if (inet_pton(AF_INET, ip.c_str(), &_addr.sin_addr) <= 0) {
+                // 转换失败，默认设置为 0.0.0.0
+                _addr.sin_addr.s_addr = INADDR_ANY;
+            }
         }
         ~InetAddr(){
         }
@@ -36,8 +40,8 @@ namespace Aether{
             return &_addr;
         }
         string StrAddr() const {
-            char buf[16];
-            string addr = inet_ntop(AF_INET,&_addr.sin_addr,buf,16);
+            char buf[32];
+            string addr = inet_ntop(AF_INET,&_addr.sin_addr,buf,32);
             addr += ":" + std::to_string(ntohs(_addr.sin_port));
             return addr;
         }

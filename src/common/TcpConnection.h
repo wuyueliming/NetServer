@@ -2,32 +2,29 @@
 
 #include "Connection.h"
 #include "TimeWheel.h"
-#include "base/TcpSocket.hpp"
+#include "TcpSocket.hpp"
 #include "Channel.h"
-#include "base/Logger.hpp"
-#include "Reactor.h"
-#include <queue>
-#include <cassert>
+#include "Logger.hpp"
+#include "EventLoop.h"
 
-namespace Aether {
+namespace NetWork {
 
     class TcpConnection : public Connection {
     public:
-        TcpConnection(Reactor *loop, ConnectionID id, int fd, InetAddr addr);
+        TcpConnection(EventLoop *loop, ConnectionID id, int fd, InetAddr addr);
         ~TcpConnection();
 
         // ===== IO 接口 =====
         void Send(const void *data, size_t len) override;
         void Send(std::string &&msg) override;
-        std::string Recv() override;
-        bool HasMessage() override;
+        Buffer* ReadBuffer() override { return &_inBuffer; }
+        size_t ReadableSize() const override { return _inBuffer.ReadAbleSize(); }
 
         // ===== 连接管理 =====
         void Shutdown() override;
         void Release() override;
         void EnableInactiveRelease(uint32_t timeout) override;
         void DisableInactiveRelease() override;
-        void SetFrameDecoder(std::unique_ptr<FrameDecoder> decoder) override;
 
         // ===== Server 内部 setup 方法 =====
         void Established() override;
@@ -36,17 +33,20 @@ namespace Aether {
         void SetClosedCallback(const AppLayerCallback& cb) override { _onClosed_Callback = cb; }
         void SetEventCallback(const AppLayerCallback& cb) override { _onEvent_Callback = cb; }
         void SetReleaseCallback(const ServerCallback& cb) override { _release_Callback = cb; }
-        void SetHighWaterMarkCallback(const HighWaterMarkCallback& cb, size_t mark) override {
-            _highWaterMark = mark;
-            _highWaterMarkCallback = cb;
-        }
-        void SetWriteCompleteCallback(const WriteCompleteCallback& cb) override {
+        void SetWriteCompleteCallback(const AppLayerCallback& cb) override {
             _writeCompleteCallback = cb;
         }
 
         // 连接迁移
-        void MigrateTo(Reactor *new_loop) override;
-        Reactor* GetLoop() const override { return _loop; }
+        void MigrateTo(EventLoop *new_loop) override;
+        EventLoop* getLoop() const override { return _loop; }
+
+        // 协议升级
+        void Upgrade(const std::any& context,
+                     const AppLayerCallback& connected_cb,
+                     const AppLayerCallback& message_cb,
+                     const AppLayerCallback& closed_cb,
+                     const AppLayerCallback& event_cb) override;
 
     private:
         void OnRead();
@@ -61,23 +61,23 @@ namespace Aether {
         void SendInLoop(const void *data, size_t len);
         void EnableInactiveReleaseInLoop(uint32_t timeout);
         void DisableInactiveReleaseInLoop();
-        void FrameDecodeInLoop();
-        void MigrateToInLoop(Reactor *new_loop);
+        void MigrateToInLoop(EventLoop *new_loop);
+        void UpgradeInLoop(const std::any& context,
+                           const AppLayerCallback& connected_cb,
+                           const AppLayerCallback& message_cb,
+                           const AppLayerCallback& closed_cb,
+                           const AppLayerCallback& event_cb);
 
     private:
         TcpSocket _ioSock;
-        Reactor *_loop;
+        EventLoop *_loop;
         Channel _channel;
         Buffer _outBuffer;
-        std::unique_ptr<FrameDecoder> _frame_decoder;  // 帧解码器（每个连接独占）
-        std::queue<std::string> _frames;           // 解析出的完整报文帧队列
         bool _enable_inactive_release;
         uint32_t _timeout;
         TaskID _releaseTaskId;
         ServerCallback _release_Callback;
-        size_t _highWaterMark = 64 * 1024 * 1024;  // 默认 64MB
-        HighWaterMarkCallback _highWaterMarkCallback;
-        WriteCompleteCallback _writeCompleteCallback;
+        AppLayerCallback _writeCompleteCallback;
     };
 
 }

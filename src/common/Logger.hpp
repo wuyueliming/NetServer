@@ -1,5 +1,5 @@
-#ifndef __AETHER_LOGGER_HPP__
-#define __AETHER_LOGGER_HPP__
+#ifndef __NETWORK_LOGGER_HPP__
+#define __NETWORK_LOGGER_HPP__
 
 // Aether 日志系统 - 合并版
 // 原文件：util.hpp, level.hpp, message.hpp, formatter.hpp, sink.hpp, logger.hpp, log.h
@@ -28,6 +28,7 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <stdexcept>
 
 namespace logsystem {
 
@@ -41,6 +42,12 @@ namespace util {
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now.time_since_epoch());
             return ms.count();
+        }
+        static std::pair<size_t, size_t> nowTime() {
+            auto tp = std::chrono::system_clock::now();
+            auto sec = std::chrono::system_clock::to_time_t(tp);
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()) % 1000;
+            return {(size_t)sec, (size_t)ms.count()};
         }
     };
 
@@ -136,12 +143,16 @@ struct LogMsg {
         , _payload(std::move(payload))
         , _level(level)
         , _line(line)
-        , _ctime(util::date::now())
-        , _ctime_ms(util::date::nowMs() % 1000)
+        , _ctime(0)
+        , _ctime_ms(0)
         , _pid(getpid())
         , _tid(util::thread::getTid())
         , _flush_marker(false)
-    {}
+    {
+        auto t = util::date::nowTime();
+        _ctime = t.first;
+        _ctime_ms = t.second;
+    }
 
     static LogMsg flushMarker() {
         LogMsg msg("", "", 0, "", LogLevel::value::OFF);
@@ -202,11 +213,12 @@ public:
         struct tm lt;
         localtime_r(&t, &lt);
         std::string fmt = _format;
-        size_t pos = fmt.find("%i");
-        if (pos != std::string::npos) {
-            char ms_buf[8];
-            snprintf(ms_buf, sizeof(ms_buf), "%03zu", msg._ctime_ms);
+        char ms_buf[8];
+        snprintf(ms_buf, sizeof(ms_buf), "%03zu", msg._ctime_ms);
+        size_t pos = 0;
+        while ((pos = fmt.find("%i", pos)) != std::string::npos) {
             fmt.replace(pos, 2, ms_buf);
+            pos += strlen(ms_buf);
         }
         char tmp[128];
         strftime(tmp, 127, fmt.c_str(), &lt);
@@ -251,7 +263,12 @@ public:
             %n  换行
             %T  缩进(Tab)
     */
+    static std::mutex& registryMutex() {
+        static std::mutex m;
+        return m;
+    }
     static void registerItem(const std::string &key, ItemFactory factory) {
+        std::lock_guard<std::mutex> lock(registryMutex());
         _registry[key] = factory;
     }
 
@@ -278,13 +295,16 @@ public:
     const std::string &pattern() const { return _pattern; }
 
     std::string format(const LogMsg &msg) {
-        std::ostringstream ss;
+        thread_local std::ostringstream ss;
+        ss.str("");
+        ss.clear();
         for (auto &it : _items) { it->format(ss, msg); }
         return ss.str();
     }
 
 private:
     FormatItem::ptr createItem(const std::string &fc, const std::string &subfmt) {
+        std::lock_guard<std::mutex> lock(registryMutex());
         auto it = _registry.find(fc);
         if (it != _registry.end()) { return it->second(subfmt); }
         return FormatItem::ptr();
@@ -334,7 +354,6 @@ private:
 
         if (sub_format_error) { std::cout << "{} 对应出错\n"; return false; }
         if (!string_row.empty()) arry.push_back(std::make_tuple(string_row, "", 0));
-        if (!format_key.empty()) arry.push_back(std::make_tuple(format_key, format_val, 1));
 
         for (auto &it : arry) {
             if (std::get<2>(it) == 0) {
@@ -391,7 +410,7 @@ class StdoutSink : public LogSink {
 public:
     using ptr = std::shared_ptr<StdoutSink>;
 protected:
-    void logImpl(const std::string &msg) override { std::cout << msg; }
+    void logImpl(const std::string &msg) override { std::cout << msg; std::cout.flush(); }
     void flushImpl() override { std::cout.flush(); }
 };
 
@@ -438,7 +457,8 @@ private:
             std::string name = createFilename();
             _ofs.open(name, std::ios::binary | std::ios::app);
             assert(_ofs.is_open());
-            _cur_fsize = 0;
+            _ofs.seekp(0, std::ios::end);
+            _cur_fsize = _ofs.tellp();
         }
     }
     std::string createFilename() {
@@ -468,15 +488,27 @@ private:
 class SinkFactory {
 public:
     using SinkCreator = std::function<LogSink::ptr(const std::string&)>;
-    static void registerSink(const std::string &type, SinkCreator creator) { _creators[type] = creator; }
+    static std::mutex& creatorsMutex() {
+        static std::mutex m;
+        return m;
+    }
+    static void registerSink(const std::string &type, SinkCreator creator) {
+        std::lock_guard<std::mutex> lock(creatorsMutex());
+        _creators[type] = creator;
+    }
     static LogSink::ptr create(const std::string &desc) {
         static std::once_flag once;
         std::call_once(once, registerBuiltinSinks);
         size_t pos = desc.find(':');
         std::string type = (pos == std::string::npos) ? desc : desc.substr(0, pos);
         std::string param = (pos == std::string::npos) ? "" : desc.substr(pos + 1);
-        auto it = _creators.find(type);
-        if (it != _creators.end()) { return it->second(param); }
+        SinkCreator creator;
+        {
+            std::lock_guard<std::mutex> lock(creatorsMutex());
+            auto it = _creators.find(type);
+            if (it != _creators.end()) creator = it->second;
+        }
+        if (creator) return creator(param);
         return LogSink::ptr();
     }
     static void registerBuiltinSinks() {
@@ -513,7 +545,11 @@ public:
     }
 
     void push(LogMsg msg) {
-        { std::lock_guard<std::mutex> lock(_mutex); _write_queue.push_back(std::move(msg)); }
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (!_running.load(std::memory_order_acquire)) return;
+            _write_queue.push_back(std::move(msg));
+        }
         _cv.notify_one();
     }
 
@@ -571,6 +607,16 @@ private:
         }
         { std::lock_guard<std::mutex> lock(_mutex); std::swap(_write_queue, read_queue); }
         if (!read_queue.empty()) { _callback(read_queue); }
+        // 处理剩余的 flush 请求，避免 flush() 永久阻塞
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            while (!_flush_requests.empty()) {
+                auto request = _flush_requests.front();
+                _flush_requests.pop();
+                request->done = true;
+                request->cv.notify_one();
+            }
+        }
     }
 
     std::atomic<bool> _running{false};
@@ -621,18 +667,22 @@ public:
     LogLevel::value loggerLevel() const { return _level; }
     void setLevel(LogLevel::value level) { _level = level; }
     void setFlushLevel(LogLevel::value level) { _flush_level = level; }
-    void addFilter(LogFilter::ptr filter) { _filters.push_back(filter); }
+    void addFilter(LogFilter::ptr filter) {
+        std::lock_guard<std::mutex> lock(_filter_mutex);
+        _filters.push_back(filter);
+    }
     void flushSinks() { for (auto &it : _sinks) it->flush(); }
 
     void log(LogMsg msg) {
+        if (msg._level == LogLevel::value::OFF) return;
         if (!shouldLog(msg)) return;
         if (_backend) {
             LogLevel::value level = msg._level;
             _backend->push(std::move(msg));
             if (level >= _flush_level) _backend->flush();
         } else {
-            std::lock_guard<std::mutex> lock(_mutex);
             std::string formatted = _formatter->format(msg);
+            std::lock_guard<std::mutex> lock(_mutex);
             for (auto &it : _sinks) {
                 if (it->shouldLog(msg._level)) it->log(formatted);
             }
@@ -644,7 +694,13 @@ public:
     public:
         LogMessage(Logger &logger, LogLevel::value level, const char *file, size_t line)
             : _logger(logger) { _msg = LogMsg(logger._name, file, line, "", level); }
-        ~LogMessage() { _msg._payload = std::move(_payload); _logger.log(std::move(_msg)); }
+        ~LogMessage() {
+            _msg._payload = std::move(_payload);
+            try {
+                _logger.log(std::move(_msg));
+            } catch (const std::exception& e) {
+            } catch (...) {}
+        }
 
         LogMessage& operator<<(const char *v) { if (v) _payload += v; else _payload += "(null)"; return *this; }
         LogMessage& operator<<(const std::string &v) { _payload += v; return *this; }
@@ -696,7 +752,7 @@ public:
         Builder& flushLevel(LogLevel::value l) { _flush_level = l; return *this; }
 
         Logger::ptr build() {
-            if (_name.empty()) { std::cerr << "日志器名称不能为空！\n"; abort(); }
+            if (_name.empty()) { throw std::invalid_argument("Logger name cannot be empty!"); }
             if (!_formatter) _formatter = std::make_shared<Formatter>();
             if (_sinks.empty()) _sinks.push_back(std::make_shared<StdoutSink>());
 
@@ -739,7 +795,13 @@ public:
 private:
     bool shouldLog(const LogMsg &msg) const {
         if (msg._level < _level.load(std::memory_order_relaxed)) return false;
-        for (auto &filter : _filters) { if (!filter->filter(msg)) return false; }
+        // 使用 copy-on-write 策略：拷贝一份 _filters 遍历，避免长时间持锁
+        std::vector<LogFilter::ptr> filters_copy;
+        {
+            std::lock_guard<std::mutex> lock(_filter_mutex);
+            filters_copy = _filters;
+        }
+        for (auto &filter : filters_copy) { if (!filter->filter(msg)) return false; }
         return true;
     }
 
@@ -749,22 +811,42 @@ private:
         size_t pos = 0;
         size_t arg_index = 0;
         while (pos < fmt.size()) {
-            if (fmt[pos] == '{' && pos + 1 < fmt.size() && fmt[pos + 1] == '}') {
-                formatArg(ss, arg_index, std::forward<Args>(args)...);
-                arg_index++;
-                pos += 2;
-            } else { ss << fmt[pos++]; }
+            if (fmt[pos] == '{') {
+                if (pos + 1 < fmt.size() && fmt[pos + 1] == '{') {
+                    ss << '{';
+                    pos += 2;
+                    continue;
+                }
+                if (pos + 1 < fmt.size() && fmt[pos + 1] == '}') {
+                    size_t i = 0;
+                    bool found = false;
+                    auto output_arg = [&](auto &&arg) {
+                        if (!found && i == arg_index) {
+                            ss << arg;
+                            found = true;
+                        }
+                        i++;
+                    };
+                    (output_arg(args), ...);
+                    if (!found) ss << "{}";
+                    arg_index++;
+                    pos += 2;
+                } else {
+                    ss << fmt[pos++];
+                }
+            } else if (fmt[pos] == '}') {
+                if (pos + 1 < fmt.size() && fmt[pos + 1] == '}') {
+                    ss << '}';
+                    pos += 2;
+                    continue;
+                }
+                ss << fmt[pos++];
+            } else {
+                ss << fmt[pos++];
+            }
         }
         return ss.str();
     }
-
-    template<typename T, typename... Args>
-    void formatArg(std::ostringstream &ss, size_t index, T &&first, Args&&... rest) {
-        if (index == 0) ss << first;
-        else formatArg(ss, index - 1, std::forward<Args>(rest)...);
-    }
-
-    void formatArg(std::ostringstream &ss, size_t index) { ss << "{}"; }
 
 private:
     std::string _name;
@@ -773,7 +855,8 @@ private:
     Formatter::ptr _formatter;
     std::vector<LogSink::ptr> _sinks;
     std::vector<LogFilter::ptr> _filters;
-    std::mutex _mutex;
+    mutable std::mutex _mutex;  // mutable 允许 const 方法加锁（shouldLog）
+    mutable std::mutex _filter_mutex;
     std::shared_ptr<BackendWorker> _backend;
 };
 
@@ -803,9 +886,13 @@ public:
         return _loggers.find(name) != _loggers.end();
     }
 
-    void addLogger(const std::string &name, Logger::ptr logger) {
+    bool addLogger(const std::string &name, Logger::ptr logger) {
         std::lock_guard<std::mutex> lock(_mutex);
+        if (_loggers.find(name) != _loggers.end()) {
+            return false;
+        }
         _loggers.insert(std::make_pair(name, logger));
+        return true;
     }
 
     Logger::ptr getLogger(const std::string &name) {
@@ -842,24 +929,30 @@ inline Logger::ptr rootLogger() {
 }
 
 #ifndef LOG_ACTIVE_LEVEL
-#define LOG_ACTIVE_LEVEL 0
+#define LOG_ACTIVE_LEVEL 2
 #endif
 
 #define LOG(level) logsystem::LoggerManager::getInstance().rootLogger()->stream( \
     logsystem::LogLevel::value::level, __FILE__, __LINE__)
 
-#define LOG_TRACE if (logsystem::LogLevel::toInt(logsystem::LogLevel::value::TRACE) >= LOG_ACTIVE_LEVEL) \
-    logsystem::LoggerManager::getInstance().rootLogger()->stream(logsystem::LogLevel::value::TRACE, __FILE__, __LINE__)
-#define LOG_DEBUG if (logsystem::LogLevel::toInt(logsystem::LogLevel::value::DEBUG) >= LOG_ACTIVE_LEVEL) \
-    logsystem::LoggerManager::getInstance().rootLogger()->stream(logsystem::LogLevel::value::DEBUG, __FILE__, __LINE__)
-#define LOG_INFO if (logsystem::LogLevel::toInt(logsystem::LogLevel::value::INFO) >= LOG_ACTIVE_LEVEL) \
-    logsystem::LoggerManager::getInstance().rootLogger()->stream(logsystem::LogLevel::value::INFO, __FILE__, __LINE__)
-#define LOG_WARN if (logsystem::LogLevel::toInt(logsystem::LogLevel::value::WARN) >= LOG_ACTIVE_LEVEL) \
-    logsystem::LoggerManager::getInstance().rootLogger()->stream(logsystem::LogLevel::value::WARN, __FILE__, __LINE__)
-#define LOG_ERROR if (logsystem::LogLevel::toInt(logsystem::LogLevel::value::ERROR) >= LOG_ACTIVE_LEVEL) \
-    logsystem::LoggerManager::getInstance().rootLogger()->stream(logsystem::LogLevel::value::ERROR, __FILE__, __LINE__)
-#define LOG_FATAL if (logsystem::LogLevel::toInt(logsystem::LogLevel::value::FATAL) >= LOG_ACTIVE_LEVEL) \
-    logsystem::LoggerManager::getInstance().rootLogger()->stream(logsystem::LogLevel::value::FATAL, __FILE__, __LINE__)
+#define LOG_TRACE logsystem::LoggerManager::getInstance().rootLogger()->stream( \
+    logsystem::LogLevel::toInt(logsystem::LogLevel::value::TRACE) >= LOG_ACTIVE_LEVEL \
+    ? logsystem::LogLevel::value::TRACE : logsystem::LogLevel::value::OFF, __FILE__, __LINE__)
+#define LOG_DEBUG logsystem::LoggerManager::getInstance().rootLogger()->stream( \
+    logsystem::LogLevel::toInt(logsystem::LogLevel::value::DEBUG) >= LOG_ACTIVE_LEVEL \
+    ? logsystem::LogLevel::value::DEBUG : logsystem::LogLevel::value::OFF, __FILE__, __LINE__)
+#define LOG_INFO logsystem::LoggerManager::getInstance().rootLogger()->stream( \
+    logsystem::LogLevel::toInt(logsystem::LogLevel::value::INFO) >= LOG_ACTIVE_LEVEL \
+    ? logsystem::LogLevel::value::INFO : logsystem::LogLevel::value::OFF, __FILE__, __LINE__)
+#define LOG_WARN logsystem::LoggerManager::getInstance().rootLogger()->stream( \
+    logsystem::LogLevel::toInt(logsystem::LogLevel::value::WARN) >= LOG_ACTIVE_LEVEL \
+    ? logsystem::LogLevel::value::WARN : logsystem::LogLevel::value::OFF, __FILE__, __LINE__)
+#define LOG_ERROR logsystem::LoggerManager::getInstance().rootLogger()->stream( \
+    logsystem::LogLevel::toInt(logsystem::LogLevel::value::ERROR) >= LOG_ACTIVE_LEVEL \
+    ? logsystem::LogLevel::value::ERROR : logsystem::LogLevel::value::OFF, __FILE__, __LINE__)
+#define LOG_FATAL logsystem::LoggerManager::getInstance().rootLogger()->stream( \
+    logsystem::LogLevel::toInt(logsystem::LogLevel::value::FATAL) >= LOG_ACTIVE_LEVEL \
+    ? logsystem::LogLevel::value::FATAL : logsystem::LogLevel::value::OFF, __FILE__, __LINE__)
 
 inline void signalHandler(int sig) {
     const char *name = "UNKNOWN";
@@ -870,11 +963,19 @@ inline void signalHandler(int sig) {
         case SIGILL:  name = "SIGILL";  break;
         case SIGTERM: name = "SIGTERM"; break;
     }
-    std::cerr << "\n=== 收到信号 " << name << " (" << sig << ") PID=" << getpid() << " ===\n";
+    const char prefix[] = "\n=== Signal ";
+    const char mid[] = " PID=";
+    char pid_buf[16];
+    snprintf(pid_buf, sizeof(pid_buf), "%d ===\n", getpid());
+    write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
+    write(STDERR_FILENO, name, strlen(name));
+    write(STDERR_FILENO, mid, sizeof(mid) - 1);
+    write(STDERR_FILENO, pid_buf, strlen(pid_buf));
     void *array[32];
     int size = backtrace(array, 32);
     backtrace_symbols_fd(array, size, STDERR_FILENO);
-    std::cerr << "=== 堆栈回溯结束 ===\n\n";
+    const char suffix[] = "=== End stack trace ===\n\n";
+    write(STDERR_FILENO, suffix, sizeof(suffix) - 1);
     signal(sig, SIG_DFL);
     raise(sig);
 }

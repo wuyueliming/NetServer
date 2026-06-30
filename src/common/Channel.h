@@ -3,23 +3,23 @@
 #include <sys/epoll.h>
 #include <functional>
 #include <memory>
-#include "base/noncopyable.hpp"
+#include "noncopyable.hpp"
 
 
-namespace Aether{
+namespace NetWork{
 
-    class Reactor;
+    class EventLoop;
 
     //管理socket的监听事件
     class Channel : public noncopyable{
     public:
         using EventCallback = std::function<void()>;
 
-        Channel(Reactor *loop, int fd):_fd(fd), _loop(loop), _events(0), _revents(0), _tied(false) {}
+        Channel(EventLoop *loop, int fd):_fd(fd), _loop(loop), _events(0), _revents(0), _tied(false) {}
         int fd() const { return _fd; }
         void SetFd(int fd) { _fd = fd; }
-        Reactor* GetLoop() const { return _loop; }
-        void SetLoop(Reactor *loop) { _loop = loop; }
+        EventLoop* getLoop() const { return _loop; }
+        void SetLoop(EventLoop *loop) { _loop = loop; }
         uint32_t events() const { return _events; }//获取想要监控的事件
         void set_revents(uint32_t events) { _revents = events; }//设置实际就绪的事件
         void SetReadCallback(const EventCallback &cb) { _read_callback = cb; }
@@ -37,19 +37,19 @@ namespace Aether{
         //当前是否监控了可写
         bool WriteAble() const { return (_events & EPOLLOUT); }
         //启动读事件监控
-        void EnableRead() { _events |= EPOLLIN; Update(); }
+        void EnableRead();
         //启动读事件监控(ET模式)，同时监控 EPOLLRDHUP 以检测对端关闭
-        void EnableReadET() { _events |= EPOLLIN | EPOLLET | EPOLLRDHUP; Update(); }
+        void EnableReadET();
         //启动写事件监控
-        void EnableWrite() { _events |= EPOLLOUT; Update(); }
+        void EnableWrite();
         //启动写事件监控(ET模式)
-        void EnableWriteET() { _events |= EPOLLOUT | EPOLLET; Update(); }
+        void EnableWriteET();
         //关闭读事件监控
-        void DisableRead() { _events &= ~EPOLLIN; Update(); }
+        void DisableRead();
         //关闭写事件监控
-        void DisableWrite() { _events &= ~EPOLLOUT; Update(); }
+        void DisableWrite();
         //关闭所有事件监控
-        void DisableAll() { _events = 0; Update(); }
+        void DisableAll();
         //移除监控
         void Remove();
         void Update();
@@ -88,7 +88,7 @@ namespace Aether{
 
     private:
         int _fd;//对任意fd的监控
-        Reactor* _loop;
+        EventLoop* _loop;
         uint32_t _events;
         uint32_t _revents;
         EventCallback _read_callback;   //可读事件被触发的回调函数

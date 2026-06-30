@@ -1,11 +1,11 @@
 #include "Acceptor.h"
-#include "base/TcpSocket.hpp"
-#include "base/InetAddr.hpp"
+#include "TcpSocket.hpp"
+#include "InetAddr.hpp"
 #include <netinet/tcp.h>
 
-namespace Aether{
+namespace NetWork{
 
-    Acceptor::Acceptor(int port, Reactor *loop, bool defer_accept)
+    Acceptor::Acceptor(int port, EventLoop *loop, bool defer_accept)
     :_listenSock(),
     _loop(loop),
     _channel(loop, -1),
@@ -21,7 +21,8 @@ namespace Aether{
         _channel.SetReadCallback([this](){ OnRead_listenfd(); });
     }
     Acceptor::~Acceptor(){
-        _channel.Remove();
+        // loop 已停止, 直接移除 channel (不走 Channel::Remove, 其 assert isInLoopThread)
+        _loop->RemoveEvent(&_channel);
         if (_idleFd >= 0) ::close(_idleFd);
         _listenSock.Close();
     }
@@ -31,11 +32,11 @@ namespace Aether{
         _acceptCallback = cb;
     }
     void Acceptor::accept(){
-        //监听套接字使用 LT 模式，避免 ET 模式下并发连接丢失的竞态条件
-        _channel.EnableRead();
+        //使用 LT 模式，避免 ET 模式下并发连接丢失的竞态条件
+        _loop->runInLoop([this] { _channel.EnableRead(); });
     }
     void Acceptor::Stop(){
-        _channel.Remove();
+        _loop->runInLoop([this] { _channel.Remove(); });
     }
     void Acceptor::OnRead_listenfd(){
         while(true){
