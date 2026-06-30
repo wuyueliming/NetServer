@@ -5,71 +5,91 @@
 #include "../common/noncopyable.hpp"
 #include "Connector.h"
 #include "../common/TcpConnection.h"
+#include "../common/LoopThreadPool.h"
 
+#include <unordered_map>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <atomic>
-#include <thread>
+#include <vector>
 
 namespace NetWork {
 
-// TcpClient：异步 TCP 客户端
-// 线程安全：connect/disconnect/stop 可在任意线程调用
-// 使用方式：用户自行创建 EventLoop 并初始化，connect() 仅发起连接，用户需自行调用 loop.loop()
-class TcpClient : public noncopyable {
-public:
-    using ConnectionCallback = AppLayerCallback;
-    using MessageCallback = AppLayerCallback;
+    using std::unordered_map;
 
-    // 构造函数：用户自行创建 EventLoop 并初始化进 client
-    TcpClient(EventLoop* loop, const InetAddr& serverAddr, const std::string& name);
-    ~TcpClient();
+    // TcpClient 异步TCP客户端, 单连是多连的特例
+    class TcpClient : public noncopyable {
+    public:
+        using LoadBalanceCallback = NetWork::LoadBalanceCallback;
 
-    // 发起连接（线程安全），仅发起连接，不创建线程运行 loop()
-    void connect();
-    // 断开连接（线程安全）
-    void disconnect();
-    // 停止连接尝试和 EventLoop (幂等, 线程安全)
-    void stop();
+        //单host构造
+        TcpClient(EventLoop* loop, const InetAddr& serverAddr, const std::string& name = "TcpClient");
+        //多host构造
+        TcpClient(EventLoop* loop, const std::vector<InetAddr>& serverAddrs, const std::string& name = "TcpClient");
+        ~TcpClient();
 
-    // 获取当前连接（线程安全）
-    std::shared_ptr<TcpConnection> connection() const;
-    EventLoop* getLoop() const { return _loop; }
+        //发起连接
+        void connect();
+        //断开所有连接
+        void disconnect();
+        //幂等停止, 不退出_loop
+        void stop();
 
-    // 是否启用自动重连
-    bool retry() const { return _retry; }
-    void enableRetry()  { _retry = true; }
-    void disableRetry() { _retry = false; }
-    const std::string& name() const { return _name; }
+        // ===== 查找连接 =====
+        //round-robin选活跃连接
+        std::shared_ptr<TcpConnection> GetConnection() const;
+        //按ConnectionID查找
+        std::shared_ptr<TcpConnection> GetConnection(ConnectionID connID) const;
+        //按目标地址查找
+        std::shared_ptr<TcpConnection> GetConnection(const InetAddr& addr) const;
+        //获取所有连接
+        std::vector<std::shared_ptr<TcpConnection>> getAllConnections() const;
 
-    // 设置回调
-    void setConnectionCallback(ConnectionCallback cb) { _connectionCallback = std::move(cb); }
-    void setMessageCallback(MessageCallback cb) { _messageCallback = std::move(cb); }
-    void setWriteCompleteCallback(const AppLayerCallback& cb) { _writeCompleteCallback = cb; }
+        EventLoop* getLoop() const { return _loop; }
+        bool retry() const { return _retry; }
+        void enableRetry()  { _retry = true; }
+        void disableRetry() { _retry = false; }
+        const std::string& name() const { return _name; }
 
-private:
-    // EventLoop 线程中执行
-    void newConnection(int sockfd);
-    void removeConnection(const std::shared_ptr<TcpConnection>& conn);
+        //设置IO线程数, connect前调用
+        void setExtraThread(int count);
+        void setLoadBalancer(LoadBalanceCallback cb) { _load_balancer = std::move(cb); }
 
-    EventLoop* _loop;                                    // 外部传入的 EventLoop，不拥有所有权
-    std::shared_ptr<Connector> _connector;
-    std::string _name;
+        //设置回调
+        void setConnectionCallback(const AppLayerCallback& cb) { _connected_cb = cb; }
+        void setMessageCallback(const AppLayerCallback& cb) { _message_cb = cb; }
+        void setWriteCompleteCallback(const AppLayerCallback& cb) { _writeComplete_cb = cb; }
 
-    // 用户回调
-    ConnectionCallback _connectionCallback;
-    MessageCallback _messageCallback;
-    AppLayerCallback _writeCompleteCallback;
+    private:
+        //Connector回调, 在_loop线程
+        void newConnection(int sockfd, std::shared_ptr<Connector> connector);
+        //连接关闭回调, 在IO loop线程
+        void removeConnection(ConnectionID connID, std::shared_ptr<Connector> connector);
+        //负载均衡选IO loop
+        EventLoop* getNextLoop();
 
-    std::atomic<bool> _retry{false};    // 自动重连
-    std::atomic<bool> _connect{false};  // 用户期望连接（原子变量，跨线程安全）
-    std::atomic<bool> _started{false};  // 是否已启动
-    uint64_t _nextConnId{1};
+        EventLoop* _loop;                            //外部传入, 运行connector
+        std::string _name;
+        std::atomic<bool> _started{false};
+        std::atomic<bool> _retry{false};             //自动重连
+        std::atomic<bool> _connect{false};           //用户期望连接
+        std::atomic<ConnectionID> _nextid{0};        //连接ID自增
 
-    mutable std::mutex _mutex;
-    std::shared_ptr<TcpConnection> _connection; // GUARDED_BY(_mutex)
-};
+        std::vector<InetAddr> _server_addrs;         //目标地址列表
+        std::vector<std::shared_ptr<Connector>> _connectors;  //持有所有connector
+        unordered_map<ConnectionID, std::shared_ptr<TcpConnection>> _connections;  //管理所有连接
+        mutable std::mutex _mutex;                   //保护_connections
+
+        LoopThreadPool _loop_thread_pool;            //IO线程池
+        LoadBalanceCallback _load_balancer;
+        std::atomic<size_t> _next_loop_idx{0};
+        mutable std::atomic<size_t> _pick_idx{0};
+
+        AppLayerCallback _message_cb;
+        AppLayerCallback _connected_cb;
+        AppLayerCallback _writeComplete_cb;
+    };
 
 } // namespace NetWork

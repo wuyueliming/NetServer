@@ -201,8 +201,8 @@ class HttpServer {
         void Delete(const std::string &pattern, const Handler &handler) {
             _delete_route.push_back(std::make_pair(std::regex(pattern), handler));
         }
-        void SetThreadCount(int count) {
-            _server.setThreadNum(count);
+        void SetExtraThread(int count) {
+            _server.setExtraThread(count);
         }
         void Listen() {
             _server.start();

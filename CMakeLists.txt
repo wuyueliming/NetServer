@@ -101,6 +101,10 @@ if(NETWORK_BUILD_TESTS)
     # test4 - 多 EventLoop
     add_executable(test4 tests/4.test_multi_loop_v1/server.cpp)
     target_link_libraries(test4 PRIVATE network_core)
+
+    # test5 - 多连 TcpClient
+    add_executable(test5 tests/5.test_multi_client_v1/multi_client.cpp)
+    target_link_libraries(test5 PRIVATE network_core)
 endif()
 
 # ===== Benchmark =====

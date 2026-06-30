@@ -16,8 +16,8 @@ public:
     // 停止服务器
     virtual void stop() = 0;
 
-    // 设置线程池大小（从 EventLoop 数量）
-    virtual void setThreadNum(int count) = 0;
+    //设置额外IO线程数
+    virtual void setExtraThread(int count) = 0;
 
     // 设置应用层回调函数
     virtual void setMessageCallback(const AppLayerCallback& cb) = 0;

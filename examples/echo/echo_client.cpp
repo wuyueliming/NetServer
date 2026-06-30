@@ -1,11 +1,10 @@
-// echo_client.cpp - 规范用法: EventLoop + connect/stop
+// echo_client.cpp - EventLoop + connect/stop用法
 //
-// 用户自行创建线程跑 loop, 用 cv + connectionCallback 同步等待连接建立
-// (如需异步连接: 去掉 cv 等待, 立即返回即可)
+// 用户自行创建线程跑loop, cv同步等待连接建立
 //
 // 用法:
 //   ./echo_client
-//   输入文本回车, 服务端会回显; 输入 quit 退出
+//   输入文本回车, 服务端会回显; 输入quit退出
 
 #include "EventLoop.h"
 #include "TcpClient.h"
@@ -50,13 +49,13 @@ int main() {
         }
     });
 
-    // 1. 用户自行创建线程跑 loop (connect 的事件回调都在该线程触发)
+    //1. 创建loop线程
     std::thread loop_thread([&loop] { loop.loop(); });
 
-    // 2. 发起连接 (线程安全, 内部 runInLoop 投递到 loop 线程)
+    //2. 发起连接
     client.connect();
 
-    // 3. 同步等待连接建立 (3s 超时)
+    //3. 等待连接建立
     {
         std::unique_lock<std::mutex> lk(g_mtx);
         g_cv.wait_for(lk, std::chrono::seconds(3), [] { return g_connected; });
@@ -64,16 +63,17 @@ int main() {
     if (!g_connected) {
         std::cerr << "connect failed or timeout" << std::endl;
         client.stop();
+        loop.Quit();
         loop_thread.join();
         return -1;
     }
     std::cout << "connected! type message (or 'quit'):" << std::endl;
 
-    // 4. 主线程读 stdin, 通过 connection() 发送
+    //4. 读stdin发送
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line == "quit") break;
-        auto conn = client.connection();
+        auto conn = client.GetConnection();
         if (conn && conn->isConnected()) {
             conn->Send(line.data(), line.size());
         } else {
@@ -82,8 +82,9 @@ int main() {
         }
     }
 
-    // 5. 停止: client.stop() 退出 loop, 用户 join 自己的 loop 线程
+    //5. 停止
     client.stop();
+    loop.Quit();
     loop_thread.join();
     return 0;
 }

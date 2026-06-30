@@ -40,7 +40,7 @@ int main() {
     NetWork::EventLoop loop;
     TcpServer server(&loop, port, "EchoServer");
 
-    server.setThreadNum(4);
+    server.setExtraThread(4);
     server.setMessageCallback(OnMessage);
     server.setConnectionCallback(OnConnection);
 

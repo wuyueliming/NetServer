@@ -25,7 +25,7 @@ int main() {
 
     NetWork::EventLoop loop;
     HttpServer server(&loop, port, timeout);
-    server.SetThreadCount(threads);
+    server.SetExtraThread(threads);
     server.SetBaseDir("./wwwroot");
 
     server.Get("/hello", [](const HttpRequest &req, HttpResponse *rsp) {

@@ -59,7 +59,11 @@ namespace NetWork{
             return _addr.sin_addr.s_addr;
         }
 
-        
+        bool operator==(const InetAddr& other) const {
+            return _addr.sin_port == other._addr.sin_port &&
+                   _addr.sin_addr.s_addr == other._addr.sin_addr.s_addr;
+        }
+
     private:
         sockaddr_in _addr;
     };

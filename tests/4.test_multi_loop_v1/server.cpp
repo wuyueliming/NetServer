@@ -136,7 +136,7 @@ int main() {
     g_server = &server;
 
     //设置从 EventLoop 线程数
-    server.setThreadNum(3);
+    server.setExtraThread(3);
 
     //设置超时销毁：30秒无活动则断开
     server.enableInactiveRelease(30);

@@ -15,7 +15,7 @@ int main() {
     // server.SetBaseDir("./www");
 
     // 设置工作线程数（默认为 CPU 核数）
-    server.SetThreadCount(4);
+    server.SetExtraThread(4);
 
     // 注册路由处理器
     server.Get("/", [](const HttpRequest &req, HttpResponse *rsp) {

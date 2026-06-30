@@ -29,10 +29,10 @@ namespace NetWork{
 
         // 用户自行调用 _loop->loop()
         void start() override;
-        // stop() 停止监听并退出 EventLoop (幂等)
+        //停止监听并退出EventLoop
         void stop() override;
 
-        void setThreadNum(int count) override;
+        void setExtraThread(int count) override;
         void setThreadNamePrefix(const std::string& prefix);
         void setLoadBalancer(LoadBalanceCallback cb);         // 设置自定义负载均衡策略
         //添加定时任务

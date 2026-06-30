@@ -7,7 +7,7 @@ using namespace NetWork;
 int main() {
     NetWork::Reactor loop;
     HttpServer server(&loop, 8080, 60);
-    server.SetThreadCount(4);
+    server.SetExtraThread(4);
     server.SetBaseDir("./wwwroot");
 
     server.Get("/hello", [](const HttpRequest &req, HttpResponse *rsp) {

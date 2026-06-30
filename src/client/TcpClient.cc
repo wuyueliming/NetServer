@@ -3,18 +3,25 @@
 #include "Logger.hpp"
 
 #include <cassert>
-#include <cstdio>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 namespace NetWork {
 
 TcpClient::TcpClient(EventLoop* loop, const InetAddr& serverAddr, const std::string& name)
     : _loop(loop),
-      _connector(std::make_shared<Connector>(loop, serverAddr)),
       _name(name)
 {
-    _connector->setNewConnectionCallback(
-        [this](int sockfd) { newConnection(sockfd); });
-    LOG(INFO) << "TcpClient[" << _name << "] created, server=" << serverAddr.StrAddr();
+    _server_addrs.push_back(serverAddr);
+    LOG(INFO) << "TcpClient[" << _name << "] created (single), server=" << serverAddr.StrAddr();
+}
+
+TcpClient::TcpClient(EventLoop* loop, const std::vector<InetAddr>& serverAddrs, const std::string& name)
+    : _loop(loop),
+      _name(name),
+      _server_addrs(serverAddrs)
+{
+    LOG(INFO) << "TcpClient[" << _name << "] created (multi), hosts=" << serverAddrs.size();
 }
 
 TcpClient::~TcpClient() {
@@ -22,109 +29,172 @@ TcpClient::~TcpClient() {
     stop();
 }
 
+void TcpClient::setExtraThread(int count) {
+    _loop_thread_pool.SetThreadCount(count < 0 ? 0 : count);
+}
+
 void TcpClient::connect() {
     if (_started.load()) return;
     _started.store(true);
     _connect.store(true, std::memory_order_relaxed);
 
-    // 发起连接，不创建线程运行 loop()，由用户自行调用 _loop->loop()
-    _connector->start();
+    _loop_thread_pool.Create();
+
+    //为每个地址创建Connector
+    for (const auto& addr : _server_addrs) {
+        auto connector = std::make_shared<Connector>(_loop, addr);
+        connector->setNewConnectionCallback(
+            [this, connector](int sockfd) { newConnection(sockfd, connector); });
+        _connectors.push_back(connector);
+        connector->start();
+    }
 }
 
 void TcpClient::disconnect() {
     _connect.store(false, std::memory_order_relaxed);
-    std::shared_ptr<TcpConnection> conn;
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-        conn = _connection;
-    }
-    if (conn) {
-        conn->Shutdown();
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (auto& [id, conn] : _connections) {
+        if (conn) conn->Shutdown();
     }
 }
 
 void TcpClient::stop() {
     _connect.store(false, std::memory_order_relaxed);
     if (!_started.load()) return;
+    _started.store(false);
 
-    // 1. 停止 Connector
-    _connector->stop();
+    //1. 停止所有connector
+    for (auto& connector : _connectors) {
+        if (connector) connector->stop();
+    }
 
-    // 2. 断开连接
-    std::shared_ptr<TcpConnection> conn;
+    //2. 释放所有连接
+    unordered_map<ConnectionID, std::shared_ptr<TcpConnection>> conns;
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        conn = _connection;
+        conns.swap(_connections);
     }
-    if (conn) {
-        conn->Release();
+    for (auto& [id, conn] : conns) {
+        if (conn) conn->Release();
     }
 
-    // 3. 退出 EventLoop
-    _loop->Quit();
+    //3. 停止线程池
+    _loop_thread_pool.Stop();
 
-    _started.store(false);
+    //不退出_loop
 }
 
-std::shared_ptr<TcpConnection> TcpClient::connection() const {
-    std::lock_guard<std::mutex> lock(_mutex);
-    return _connection;
-}
-
-void TcpClient::newConnection(int sockfd) {
+void TcpClient::newConnection(int sockfd, std::shared_ptr<Connector> connector) {
+    //在_loop线程
     assert(_loop->isInLoopThread());
 
-    // 获取对端地址
+    ConnectionID connID = _nextid.fetch_add(1);
+    EventLoop* ioLoop = getNextLoop();
+
     struct sockaddr_in peerAddrRaw;
     socklen_t addrlen = sizeof(peerAddrRaw);
     ::getpeername(sockfd, (struct sockaddr*)&peerAddrRaw, &addrlen);
     InetAddr peerAddr(peerAddrRaw);
 
-    ConnectionID connID = _nextConnId++;
+    auto conn = std::make_shared<TcpConnection>(ioLoop, connID, sockfd, peerAddr);
 
-    // 创建 TcpConnection（复用服务端连接类）
-    auto conn = std::make_shared<TcpConnection>(_loop, connID, sockfd, peerAddr);
-
-    conn->SetConnectedCallback(_connectionCallback);
-    conn->SetMessageCallback(_messageCallback);
-    conn->SetWriteCompleteCallback(_writeCompleteCallback);
-    // 客户端不需要 setReleaseCallback（没有映射表）
-    // 设置连接断开时重新连接
-    conn->SetClosedCallback([this](const ConnectionPtr& c) {
+    conn->SetConnectedCallback(_connected_cb);
+    conn->SetMessageCallback(_message_cb);
+    conn->SetWriteCompleteCallback(_writeComplete_cb);
+    //连接断开回调removeConnection
+    conn->SetClosedCallback([this, connID, connector](const ConnectionPtr& c) {
         auto tcpConn = std::static_pointer_cast<TcpConnection>(c);
-        removeConnection(tcpConn);
+        removeConnection(connID, connector);
     });
 
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        _connection = conn;
+        _connections[connID] = conn;
     }
 
-    // 建立连接，开始事件监听
+    LOG(INFO) << "TcpClient[" << _name << "] new connection connID:" << connID
+              << " peer:" << peerAddr.StrAddr();
+
     conn->Established();
 }
 
-void TcpClient::removeConnection(const std::shared_ptr<TcpConnection>& conn) {
-    assert(_loop->isInLoopThread());
-
+void TcpClient::removeConnection(ConnectionID connID, std::shared_ptr<Connector> connector) {
+    //在IO loop线程
+    std::shared_ptr<TcpConnection> conn;
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        if (_connection == conn) {
-            _connection.reset();
+        auto it = _connections.find(connID);
+        if (it != _connections.end()) {
+            conn = it->second;
+            _connections.erase(it);
         }
     }
 
-    // 通知上层连接已断开 (conn 此时已 DISCONNECTED, isConnected()==false)
-    if (_connectionCallback) {
-        _connectionCallback(conn);
+    //通知上层连接已断开
+    if (conn && _connected_cb) {
+        _connected_cb(conn);
     }
 
-    // 自动重连
+    //重连: restart必须在_loop线程
     if (_retry.load(std::memory_order_relaxed) && _connect.load(std::memory_order_relaxed)) {
         LOG(INFO) << "TcpClient[" << _name << "] reconnecting to "
-                  << _connector->serverAddress().StrAddr();
-        _connector->restart();
+                  << connector->serverAddress().StrAddr();
+        _loop->runInLoop([connector]() { connector->restart(); });
     }
+}
+
+EventLoop* TcpClient::getNextLoop() {
+    const auto& loops = _loop_thread_pool.GetAllLoops();
+    if (loops.empty()) return _loop;  //extraThread=0时connector和IO都在_loop
+
+    //extraThread>0时IO在池loop
+    if (_load_balancer) {
+        size_t idx = _load_balancer(loops);
+        return loops[idx % loops.size()];
+    }
+    size_t idx = _next_loop_idx.fetch_add(1) % loops.size();
+    return loops[idx];
+}
+
+std::shared_ptr<TcpConnection> TcpClient::GetConnection() const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    //收集活跃连接round-robin选一个
+    std::vector<std::shared_ptr<TcpConnection>> active;
+    active.reserve(_connections.size());
+    for (const auto& [id, conn] : _connections) {
+        if (conn && conn->isConnected()) {
+            active.push_back(conn);
+        }
+    }
+    if (active.empty()) return nullptr;
+    size_t idx = _pick_idx.fetch_add(1) % active.size();
+    return active[idx];
+}
+
+std::shared_ptr<TcpConnection> TcpClient::GetConnection(ConnectionID connID) const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    auto it = _connections.find(connID);
+    return (it != _connections.end()) ? it->second : nullptr;
+}
+
+std::shared_ptr<TcpConnection> TcpClient::GetConnection(const InetAddr& addr) const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (const auto& [id, conn] : _connections) {
+        if (conn && conn->PeerAddr() == addr) {
+            return conn;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<std::shared_ptr<TcpConnection>> TcpClient::getAllConnections() const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    std::vector<std::shared_ptr<TcpConnection>> result;
+    result.reserve(_connections.size());
+    for (const auto& [id, conn] : _connections) {
+        if (conn) result.push_back(conn);
+    }
+    return result;
 }
 
 } // namespace NetWork

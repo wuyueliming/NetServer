@@ -16,7 +16,7 @@ namespace NetWork{
     _acceptor(std::make_unique<Acceptor>(port, _loop, false)),
     _connections()
     {
-        _loop_thread_pool.SetThreadCount(kDefaultThreadNum);
+        _loop_thread_pool.SetThreadCount(0);  // 默认不创建额外线程，主loop同时accept+IO
         _acceptor->SetAcceptCallback([this](int fd, InetAddr addr){ AcceptConnection(fd, addr); });
     }
 
@@ -57,7 +57,7 @@ namespace NetWork{
             }
         });
 
-        // 3. 退出主 EventLoop (从线程池的 Stop+join 由 ~LoopThreadPool 统一处理)
+        //3. 退出主EventLoop
         _loop->Quit();
     }
 
@@ -133,7 +133,7 @@ namespace NetWork{
         _timeout = 0;
     }
 
-    void TcpServer::setThreadNum(int count){
+    void TcpServer::setExtraThread(int count){
         _loop_thread_pool.SetThreadCount(count);
     }
 
